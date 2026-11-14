@@ -107,11 +107,11 @@ The build refuses Node versions other than 24 LTS. Bun runs installation and tes
 The browser suite uses four local ports starting at localhost:8799; set `LOGIN_E2E_PORT`
 to the first of four free consecutive ports when another development session is using them.
 
-The exact v0.42.0 UI release uses its explicit peers `@yesid/tokens`, `@yesid/motion`,
+The exact v0.43.0-rc.1 UI candidate uses its explicit peers `@yesid/tokens`, `@yesid/motion`,
 `@yesid/seo-kit`, Svelte 5.57.2 and Satori 0.33.5. CSS order is tokens, Tailwind,
 UI base; the copied self-hosted font stylesheet loads separately. No SvelteKit router is needed.
 
-The app uses SiteHeader (wordmark `Login`), SiteFooter, Wordmark, Button and ConstructionProps.
+The app uses SiteHeader (still `yesid. | Login` brand), SiteFooter, Wordmark, Button and ConstructionProps.
 ConstructionProps appear only on `/` itself.
 The fixed background uses the shared `circuit-grid` class, as the website does.
 There is no generic email/code input in this release, so native labelled inputs use semantic tokens.
@@ -152,9 +152,9 @@ bottom toolbar, hidden while an entry is open. Verify its placement when changin
 
 ## Login chrome and account email
 
-The login, popup, People and `/account` share `login/Chrome.svelte`. The real SiteHeader receives empty links and menu items. Its navigation lifecycle has inert router registration callbacks because every navigation unloads the document. Only its empty menu button is hidden with a login-scoped selector; the package is unchanged. ConstructionProps is decorative and appears only on `/`, spread with a floodlight, in a 240px ground or 100px at 1023px and below.
+The login, popup, People and `/account` share `login/Chrome.svelte`. The real SiteHeader receives empty links and menu items. Its navigation lifecycle has inert router registration callbacks because every navigation unloads the document. The package omits its empty menu control; the brand snippet supplies the still house wordmark, divider and product link. ConstructionProps is decorative and appears only on `/`, spread with a floodlight, in a 240px ground or 100px at 1023px and below.
 
-The footer is the shared SiteFooter, as on yesid.dev and Transit, and the header carries the product wordmark `Login`. The footer's lamp and date come from the design system; no health probe sits behind them. The sign-in form is centered in the first screen, above the ground, on the sign-in page only.
+The footer is the shared SiteFooter, as on yesid.dev and Transit, and the header carries the `yesid. | Login` brand. The footer keeps the localized tagline without an availability claim or date. The sign-in form is centered in the first screen, above the ground, on the sign-in page only.
 
 Sign-in step two stores only its step, email and five-minute deadline in sessionStorage. Language links reload the full document and preserve the site hint. Codes and tokens never enter that entry. It is removed on success, return to step one or expiry. Unavailable storage is reported before switching languages.
 

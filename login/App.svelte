@@ -152,11 +152,11 @@
           {#each view.switching ? view.sites.filter(site => site.slug === controller.requested) : view.sites as site}
             <div>
               <p>{site.label}</p>
-              <Button class="wrap-action" size="cta" variant="outline" disabled={view.busy} aria-busy={view.opening === site.slug} onclick={() => controller.open(site.slug)}>{view.opening === site.slug ? text.openingSite.replace('{site}', site.label) : view.openError === site.slug ? text.retry : view.switching && site.slug === controller.requested ? text.keepEditing : text.openEditor}</Button>
+              <Button wrap size="cta" variant="outline" disabled={view.busy} aria-busy={view.opening === site.slug} onclick={() => controller.open(site.slug)}>{view.opening === site.slug ? text.openingSite.replace('{site}', site.label) : view.openError === site.slug ? text.retry : view.switching && site.slug === controller.requested ? text.keepEditing : text.openEditor}</Button>
               {#if view.openError === site.slug}<p role="status">{view.message === 'editorStorage' ? text.editorStorage : text.openFailure}</p>{/if}
             </div>
           {/each}
-        </div>{#if view.switching}<p role="status">{text.switchNotice}</p><Button class="wrap-action" size="cta" disabled={view.busy} onclick={() => controller.switchSite()}>{text.switchSite}</Button>{/if}</Card>
+        </div>{#if view.switching}<p role="status">{text.switchNotice}</p><Button wrap size="cta" disabled={view.busy} onclick={() => controller.switchSite()}>{text.switchSite}</Button>{/if}</Card>
       {/if}
       {#if view.message === 'sitesError'}<Button disabled={view.busy} onclick={() => controller.retrySites()}>{text.retry}</Button>{/if}
       {#if view.empty}<Button disabled={view.busy} onclick={() => controller.switchSite()}>{text.signOut}</Button>{/if}

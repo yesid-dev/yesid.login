@@ -108,7 +108,7 @@
 <svelte:head><title>{text.title} | yesid.dev</title></svelte:head>
 <Chrome {locale}>
   <main id="main" tabindex="-1">
-    <a href="/">{text.back}</a><Masthead kicker="yesid. | login" heading={text.title} lede={text.lead} />
+    <a href="/">{text.back}</a><Masthead heading={text.title} lede={text.lead} />
     <p class="label-station">{step === 'ask' ? '1 / 3' : step === 'current' ? '2 / 3' : '3 / 3'} · {steps[step === 'ask' ? 0 : step === 'current' ? 1 : 2]}</p>
     {#if step !== 'done'}
       <Card class="form-card"><form onsubmit={event => { event.preventDefault(); void submit(); }}>

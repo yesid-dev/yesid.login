@@ -1,3 +1,4 @@
+import { log11Acceptance, log11Chrome, log11Error, log11Links } from './log11.ts';
 import { log10Motion, watchLog10Motion } from './log10-motion.ts';
 import { log10Chrome, log10Focus, log10Preferences } from './log10.ts';
 import { SCENARIO_NAMES, SHARDS, assertShardAssignment, parseShard, type ScenarioName } from './shards.ts';
@@ -533,9 +534,13 @@ async function navbarIsWhole(page: Page) {
   await page.waitForTimeout(2500);
   await page.mouse.move(640, 500);
   await page.waitForTimeout(800);
+  for (const width of [320, 390, 1280]) {
+    await page.setViewportSize({ width, height: 844 });
+    await log11Chrome(page, String(width), check);
+  }
   const header = page.locator('[data-slot="site-header"], header').first();
   await header.screenshot({ path: resolve(SHOTS, 'navbar.png') });
-  check('the header names the product', (await page.locator('[data-slot="wordmark"]').first().innerText()).replace(/\s/g, '') === 'Login.');
+  check('the header names the product', (await page.locator('[data-slot="wordmark"]').first().innerText()).replace(/\s/g, '') === 'yesid.');
   check('the footer is the shared one', await page.locator('[data-testid="footer"]').count() === 1);
   check('the sign-in page keeps the construction props', await page.locator('.construction-ground').count() === 1);
   for (const path of ['legal/privacy', 'nope/']) {
@@ -862,6 +867,9 @@ async function checkContrast(page: Page, name: string) {
   check('text contrast at least 4.5:1: '+name,failures.length===0,failures.join(', '));
 }
 async function capture(page: Page, name: string) {
+  if (await page.locator('.login-chrome').count()) await log11Chrome(page, name, check);
+  await log11Error(page, name, check);
+  if (await page.locator('.login-chrome').count()) await log11Links(page, name, check);
   await log10Motion(page, name, check);
   check('no horizontal scroll: ' + name, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   // LOG-1: presentation of S-3/S-4 and A-3/A-4/A-5 fields; their validation and proofs stay unchanged.
@@ -1019,6 +1027,7 @@ try {
   // The design system's view transitions report this harmlessly when a page navigates during one.
   page.on('pageerror', (error) => { if (error.message !== 'Transition was skipped') problems.push(error.message); });
   const scenarios = {
+    log11Acceptance: () => log11Acceptance(launched, ORIGIN, check),
     log10Preferences: () => log10Preferences(launched, ORIGIN, check),
     sitesHandoff: () => sitesHandoff(launched, ORIGIN, check),
     editorLoading: () => editorLoading(launched, ORIGIN, check),
