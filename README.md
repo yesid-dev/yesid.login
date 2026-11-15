@@ -120,7 +120,7 @@ A five-second cleanup phase can escalate to native termination; warnings include
 resource and phase durations. Success requires verified exit and temp removal; missing
 identity metadata, close/kill errors and surviving processes remain failures.
 
-The exact v0.43.0 UI release uses its explicit peers `@yesid/tokens`, `@yesid/motion`,
+The exact v0.45.0 UI release uses its explicit peers `@yesid/tokens`, `@yesid/motion`,
 `@yesid/seo-kit`, Svelte 5.57.2 and Satori 0.33.5. CSS order is tokens, Tailwind,
 UI base; the copied self-hosted font stylesheet loads separately. No SvelteKit router is needed.
 
