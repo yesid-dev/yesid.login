@@ -1,12 +1,42 @@
 /** Cleanup is best effort on interruption, but must never hold a process open indefinitely. */
 export const CLEANUP_LIMIT_MS = 5_000;
 
-async function deadline<T>(work: () => Promise<T>, limitMs: number, message: string): Promise<T> {
+/** Advance the parent's idle watchdog only when a new bounded cleanup phase starts. */
+export function reportCleanupProgress(): void {
+  if (!process.connected) return;
+  // IPC loss is supervised by the parent; it must not prevent local reclamation.
+  try { process.send?.({ type: 'e2e-cleanup-progress' }, () => {}); } catch {}
+}
+
+/** A deadline is an escalation trigger, not evidence that an owned process survived. */
+export async function closeOwnedResource(name: string, close: () => Promise<unknown>,
+  force: () => Promise<unknown>, verify: () => Promise<unknown>, limitMs = CLEANUP_LIMIT_MS): Promise<void> {
+  const expired = new Error(`${name} graceful close exceeded its deadline`);
+  let failure: unknown;
+  let failed = false;
+  try { await deadline(close, limitMs, expired); }
+  catch (error) {
+    if (error !== expired) { failed = true; failure = error; }
+    console.info(`cleanup - ${name}: escalating to forced termination`);
+    const forceExpired = new Error(`${name} force termination exceeded its deadline`);
+    try { await deadline(force, limitMs, forceExpired); }
+    catch (forceError) {
+      if (forceError !== forceExpired) throw new AggregateError([error, forceError], `${name} force termination failed: ${String(forceError)}`);
+      console.info(`cleanup - ${name}: force completion pending; verifying process exit`);
+    }
+  }
+  try { await deadline(verify, limitMs, `${name} exit verification exceeded its deadline`); }
+  catch (error) { throw new Error(`${name} remains unverified: ${String(error)}`, { cause: error }); }
+  if (failed) throw failure;
+}
+
+async function deadline<T>(work: () => Promise<T>, limitMs: number, message: string | Error): Promise<T> {
+  reportCleanupProgress();
   let limit: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       Promise.resolve().then(work),
-      new Promise<never>((_, reject) => { limit = setTimeout(() => reject(new Error(message)), limitMs); })
+      new Promise<never>((_, reject) => { limit = setTimeout(() => reject(typeof message === 'string' ? new Error(message) : message), limitMs); })
     ]);
   } finally { clearTimeout(limit); }
 }

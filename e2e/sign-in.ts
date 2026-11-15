@@ -14,8 +14,10 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { chromium, type Page } from 'playwright-core';
+import { startLocalBrowser } from './local-browser.ts';
 import { startLocalWorker } from './local-worker.ts';
 import { cleanup, cleanupStarted } from './lifecycle.ts';
+import { ownedProcesses, processInventory, closeWorkerProcesses, stopProcessInventory, warmProcessInventory, remainingOwnedProcesses, terminateProcessTree, waitForProcessExit, isProcessAlive, verifyProcessesGone, type ProcessEntry } from './owned-processes.ts';
 
 assertShardAssignment(SCENARIO_NAMES, SHARDS);
 
@@ -585,6 +587,19 @@ async function invitationFlow(page: Page) {
 }
 // LOG-4 changes People only; existing journeys retain S-1/S-5 and H-1/H-2 coverage.
 async function peopleCorrectness(page: Page) {
+  // LOG-4 owns its context and session; later scenarios retain their original browser state.
+  const context = await page.context().browser()!.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const isolated = await context.newPage();
+    await sql("INSERT INTO user (id,name,email,emailVerified,createdAt,updatedAt) VALUES ('e2e-people','E2E People','employee@example.test',1,datetime('now'),datetime('now')); INSERT INTO membership (site_slug,user_id,role) VALUES ('example','e2e-people','owner')");
+    await requestCode(isolated, '?site=example&lang=fr', 'employee@example.test');
+    await codeField(isolated).fill(CODE);
+    await isolated.locator('form button[type="submit"]').click();
+    await isolated.waitForURL(`${ORIGIN}/example/`);
+    await peopleCorrectnessChecks(isolated);
+  } finally { await context.close(); }
+}
+async function peopleCorrectnessChecks(page: Page) {
   const members = Array.from({ length: 25 }, (_, i) => ({ id: `synthetic-${i}`, email: `person${i}@example.test`, role: 'employee', status: 'active', lastEdit: null }));
   for (const lang of ['fr', 'en', 'es'] as const) {
     for (const width of [390, 1280]) {
@@ -981,13 +996,37 @@ async function analyticsCounting(browser: Awaited<ReturnType<typeof chromium.lau
   await context.close();
 }
 
-let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
-let browserLaunch: ReturnType<typeof chromium.launch> | undefined;
+let browserLaunch: ReturnType<typeof startLocalBrowser> | undefined;
+let localBrowser: Awaited<ReturnType<typeof startLocalBrowser>> | undefined;
 let closing: Promise<void> | undefined;
-const closeResources = () => closing ??= cleanup([
-  () => browser ? browser.close() : cleanupStarted(browserLaunch, launched => launched.close()),
-  () => worker ? worker.dispose() : cleanupStarted(workerStart, started => started.dispose())
-]);
+const closeResources = () => closing ??= (async () => {
+  const failures: unknown[] = [];
+  let owned: ProcessEntry[] | undefined;
+  try { owned = ownedProcesses(process.pid, await processInventory()); }
+  catch (error) { failures.push(new Error('Could not inventory owned Chromium/workerd processes', { cause: error })); }
+  try { await timed('cleanup browser', async () => localBrowser ? localBrowser.dispose() : cleanup([() => cleanupStarted(browserLaunch, launched => launched.dispose())])); }
+  catch (error) { failures.push(error); }
+  try { await timed('cleanup Worker', () => closeWorkerProcesses(async () => worker ? worker.dispose() : cleanupStarted(workerStart, started => started.dispose()), owned)); }
+  catch (error) { failures.push(error); }
+  try {
+    if (owned) {
+      const rows = await processInventory();
+      const remaining = remainingOwnedProcesses(owned, rows).filter(row => isProcessAlive(row.pid));
+      if (remaining.length) {
+        console.info(`cleanup - terminating orphaned owned processes: ${remaining.map(row => `${row.name} pid ${row.pid}`).join(', ')}`);
+        for (const row of remaining) {
+          try { terminateProcessTree(row.pid, rows); }
+          catch (error) { failures.push(error); }
+        }
+        await Promise.all(remaining.map(row => waitForProcessExit(row.pid)));
+      }
+      verifyProcessesGone(owned, remaining.length ? await processInventory() : rows, isProcessAlive);
+      console.info(`cleanup - verified 0 owned Chromium/workerd processes (${owned.length} tracked)`);
+    }
+  } catch (error) { failures.push(error); }
+  try { await stopProcessInventory(); } catch (error) { failures.push(error); }
+  if (failures.length) throw new AggregateError(failures, 'Resource cleanup failed');
+})();
 async function stopRun(reason: string, exitCode: number) {
   clearTimeout(watchdog);
   console.error(reason);
@@ -1008,12 +1047,15 @@ const forwardedSignal = (message: unknown) => {
   if (message.signal === 'SIGTERM') terminate();
 };
 process.on('message', forwardedSignal);
+warmProcessInventory();
+let scenarioFailed = false;
+let scenarioFailure: unknown;
 try {
   await timed('prepare', prepare);
-  const launched = await (browserLaunch = chromium.launch());
-  browser = launched;
+  localBrowser = await (browserLaunch = startLocalBrowser());
+  const launched = localBrowser.browser;
   const finishMotionChecks = watchLog10Motion(launched, check);
-  const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: 'dark' })).newPage();
+  const page = await (await launched.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: 'dark' })).newPage();
   const problems: string[] = [];
   page.on('console', (message) => { if (message.type() === 'error' && /Content Security Policy/i.test(message.text())) problems.push(message.text()); });
   // The design system's view transitions report this harmlessly when a page navigates during one.
@@ -1054,9 +1096,17 @@ try {
   check('no script errors or security policy violations on the sign-in pages', problems.length === 0, problems.slice(0, 3).join(' | ').slice(0, 400));
   finishMotionChecks();
   console.info(`All passed. Screenshots: ${SHOTS}`);
+} catch (error) {
+  scenarioFailed = true;
+  scenarioFailure = error;
+  throw error;
 } finally {
   console.info(`timing - total: ${Math.round(performance.now() - started)} ms; commands: ${commandCount}, ${Math.round(commandMs)} ms`);
   try { await closeResources(); }
+  catch (error) {
+    if (scenarioFailed) throw new AggregateError([scenarioFailure, error], 'Browser checks and resource cleanup failed');
+    throw error;
+  }
   finally {
     clearTimeout(watchdog);
     process.off('SIGINT', interrupt);
