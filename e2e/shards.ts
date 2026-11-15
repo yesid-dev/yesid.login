@@ -1,5 +1,6 @@
 /** Source of truth shared by assignment tests and the typed browser registry. */
 export const SCENARIO_NAMES = [
+  'log11Acceptance',
   'log10Preferences',
   'sitesHandoff',
   'editorLoading',
@@ -33,7 +34,7 @@ export type ScenarioName = typeof SCENARIO_NAMES[number];
 export const SHARDS: readonly (readonly ScenarioName[])[] = [
   ['sitesHandoff', 'editorLoading'],
   ['log10Preferences', 'forgivingCodeEntry', 'pendingStorageRecovery', 'accountCorrectness', 'accountStorageBlocked', 'accountNavigation'],
-  ['startupRecovery', 'startupEffectAndIsolation', 'legalInitialFragment', 'legalWithoutJavaScript',
+  ['log11Acceptance', 'startupRecovery', 'startupEffectAndIsolation', 'legalInitialFragment', 'legalWithoutJavaScript',
     'legalLanguageHash', 'analyticsCounting', 'themeAtSendTime', 'legalNavigation', 'signsInWithARealCode', 'peopleCorrectness', 'refusesAWrongCode',
     'keepsItsPlaceWhenLanguageChanges', 'navbarIsWhole', 'emailSamples'],
   // LOG-4's isolated People replies run after shard 3 signs in, without changing fixture data.

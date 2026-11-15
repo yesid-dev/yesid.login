@@ -20,7 +20,7 @@ function linked(text: string): string {
 function sectionHtml(section: LegalSection, level = 2): string {
   const id = escapeLegal(section.id);
   const paragraphs = (values: readonly string[] = []) => values.map(p => `<p>${linked(p)}</p>`).join('');
-  return `<h${level} id="${id}">${escapeLegal(section.heading)}<a class="heading-anchor" href="#${id}" aria-labelledby="${id}">#</a></h${level}>`
+  return `<h${level} id="${id}">${escapeLegal(section.heading)}<a data-heading-anchor href="#${id}" aria-labelledby="${id}">#</a></h${level}>`
     + paragraphs(section.paragraphs)
     + (section.list ? `<ul>${section.list.map(item => `<li>${linked(item)}</li>`).join('')}</ul>` : '')
     + paragraphs(section.after)

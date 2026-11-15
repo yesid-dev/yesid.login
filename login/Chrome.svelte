@@ -31,9 +31,13 @@
 </script>
 <div class="site-grid circuit-grid" aria-hidden="true"></div>
 <div class="login-chrome">
-  <SiteHeader {navigation} {home} wordmark="Login" links={[]} menuItems={[]}
+  <SiteHeader {navigation} {home} wordmarkAutoPlay={false} links={[]} menuItems={[]}
     labels={{ openMenu: 'Menu', closeMenu: 'Menu', menu: 'Menu', theme: text.theme, menuFooter: '', skipToContent: text.skip }}
-    language={{ locale, locales, href: languageHref, label: text.language, names: { fr: 'Français', en: 'English', es: 'Español' }, reload: true }} />
+    language={{ locale, locales, href: languageHref, label: text.language, names: { fr: 'Français', en: 'English', es: 'Español' }, reload: true }}>
+    {#snippet brand()}
+      <span class="brand-cluster navbar-brand"><Wordmark href="https://yesid.dev" external autoPlay={false} animate={false} /><span class="brand-divider" aria-hidden="true"></span><a class="brand-product" href={home}>Login</a></span>
+    {/snippet}
+  </SiteHeader>
   <div class="shell" class:shell-center={center}>{@render children()}</div>
   {#if location.pathname === '/'}<div class="construction-ground" aria-hidden="true"><ConstructionProps layout="spread" floodlight /></div>{/if}
   <SiteFooter tagline={text.footerTagline} {groups}>
