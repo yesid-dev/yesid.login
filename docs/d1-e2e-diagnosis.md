@@ -96,12 +96,18 @@ metadata fails closed, including on POSIX (whose inventory now includes process 
 A full snapshot excludes processes born after collection began. An unknown orphan whose
 parent has exited is not inferred to be owned from that stale PPID; live ambiguous lineage
 fails verification without a signal. Previously recorded child identities remain reclaimable.
-Each PID-based termination immediately re-reads the target's PID and birth time. The browser
+Windows termination opens one process handle in the existing host, checks canonical
+StartTime, and calls Kill before Dispose. The held handle prevents PID reuse between the
+check and kill. Replies distinguish not-found, identity-mismatch (never killed) and killed.
+POSIX retains its fresh-check/PID-signal path, including the non-atomic check-to-signal
+window and second-resolution start times; live POSIX auditing remains unverified. The browser
 root is recorded at launch and also guarded by its ChildProcess exit/signal state; escalation
 does not call Playwright's `server.kill()`, whose Windows implementation invokes `taskkill`
 through a shell. Final ownership combines initial and fresh post-dispose inventories so a
 late launch cannot disappear from the audit. Exit waits report every stuck PID together.
 Windows inventory requests have sequence IDs, and a timed-out host cannot serve later requests.
+Snapshot requests are not retried: a retry through a potentially hung/delayed host could hide
+a real hang. The existing deadline and terminal failure remain unchanged.
 Full snapshots use CIM for ancestry; targeted identity checks read native process start time,
 canonicalized to CIM microsecond precision, without enumerating the machine per signal.
 The Windows inventory host itself shuts down through its guarded native ChildProcess handle.

@@ -1,7 +1,7 @@
 import { chromium, type Browser } from 'playwright-core';
 import type { ChildProcess } from 'node:child_process';
-import { CLEANUP_LIMIT_MS, closeOwnedResource } from './lifecycle.ts';
-import { processInventory, terminateProcessTree, waitForProcessExit, sameProcess, ownedProcesses, type Inventory } from './owned-processes.ts';
+import { CLEANUP_LIMIT_MS, cleanup, closeOwnedResource } from './lifecycle.ts';
+import { processInventory, terminateProcessTree, waitForProcessExit, sameProcess, ownedProcesses, type Inventory, type ProcessEntry } from './owned-processes.ts';
 
 type BrowserHandle = { contexts(): { close(): Promise<unknown> }[]; close(): Promise<unknown> };
 type ServerHandle = { process(): Pick<ChildProcess, 'pid' | 'exitCode' | 'signalCode'>; wsEndpoint(): string; close(): Promise<unknown> };
@@ -22,10 +22,18 @@ export async function startLocalBrowser(deps: Dependencies<BrowserHandle> = defa
   const child = server.process();
   const name = `Chromium pid ${child.pid}`;
   const running = () => child.exitCode === null && child.signalCode === null;
-  const root = ownedProcesses(process.pid, await deps.inventory()).find(row => row.pid === child.pid);
-  if (!root || !running()) throw new Error(`${name} launch identity unavailable`);
-  // Validating itself fails closed if birth metadata is missing, including on POSIX.
-  sameProcess(root, root);
+  let root: ProcessEntry;
+  try {
+    const captured = ownedProcesses(process.pid, await deps.inventory()).find(row => row.pid === child.pid);
+    if (!captured || !running()) throw new Error(`${name} launch identity unavailable`);
+    sameProcess(captured, captured);
+    root = captured;
+  } catch (error) {
+    // The server was launched, but no PID authority was established. Close its handle only.
+    try { await cleanup([() => server.close()], deps.limitMs ?? CLEANUP_LIMIT_MS); }
+    catch (closeError) { throw new AggregateError([error, closeError], 'Browser launch identity and server cleanup failed'); }
+    throw error;
+  }
   const verify = () => deps.wait(root);
   const force = async () => {
     const rows = await deps.inventory();

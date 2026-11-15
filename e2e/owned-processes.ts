@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { CLEANUP_LIMIT_MS, closeOwnedResource, reportCleanupProgress } from './lifecycle.ts';
-import { createInventoryChannel } from './inventory-channel.ts';
+import { createInventoryChannel, type TerminationResult } from './inventory-channel.ts';
 
 export type ProcessEntry = { pid: number; parent: number; name: string; created: string };
 export type Inventory = (pid?: number) => Promise<ProcessEntry[]>;
@@ -12,10 +12,34 @@ export type Alive = (entry: ProcessEntry) => Promise<boolean>;
 const execute = promisify(execFile);
 const pwsh = join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', '7', 'pwsh.exe');
 const query = `
+function Stop-RecordedProcess($request) {
+  $candidate = $null
+  try {
+    $candidate = [Diagnostics.Process]::GetProcessById([int]$request.pid)
+    # Open and retain the native handle before checking birth. Dispose only after Kill.
+    $heldHandle = $candidate.Handle
+    if($candidate.HasExited) { return 'not-found' }
+    $ticks = $candidate.StartTime.ToFileTimeUtc()
+    $created = ($ticks - ($ticks % 10)).ToString()
+    if($created -ne [string]$request.created) { return 'identity-mismatch' }
+    $candidate.Kill()
+    return 'killed'
+  } catch {
+    $reason = $_.Exception
+    while($reason.InnerException) { $reason = $reason.InnerException }
+    if($reason -is [ArgumentException] -or $reason -is [InvalidOperationException] -or ($reason -is [ComponentModel.Win32Exception] -and $reason.NativeErrorCode -eq 87)) { return 'not-found' }
+    throw
+  } finally { if($candidate) { $candidate.Dispose() } }
+}
 [Console]::WriteLine('ready')
 while($null -ne ($line = [Console]::ReadLine())) {
   $request = $line | ConvertFrom-Json
   try {
+    if($request.operation -eq 'terminate') {
+      $result = Stop-RecordedProcess $request
+      [pscustomobject]@{id=$request.id;result=$result} | ConvertTo-Json -Compress
+      continue
+    }
     if($null -ne $request.pid) {
       $candidate = $null
       try {
@@ -153,14 +177,29 @@ function unverifiedLineage(owned: ProcessEntry[], rows: ProcessEntry[]): Process
     .filter(row => !known.has(`${row.pid}:${row.created}`));
 }
 
-/** Re-read each target immediately before signalling; stale/recycled identities are never killed. */
+/** Windows comparison and kill share the same held handle in the existing host. */
+export async function terminateWindowsProcess(entry: ProcessEntry): Promise<TerminationResult> {
+  birth(entry);
+  if (!Number.isSafeInteger(entry.pid) || entry.pid <= 0) throw new Error('Invalid process ID');
+  if (process.platform !== 'win32') throw new Error('Held-handle termination requires Windows');
+  warmProcessInventory();
+  try { await bounded(ready); } catch (error) { channel.fail(error as Error); throw error; }
+  return channel.terminate(entry);
+}
+
+/** Windows is handle-bound. POSIX retains its non-atomic fresh-check/PID-signal path. */
 export async function terminateProcessTree(root: ProcessEntry, rows: ProcessEntry[],
-  { inventory = processInventory, terminate = (pid: number) => { process.kill(pid, 'SIGKILL'); } }:
-  { inventory?: Inventory; terminate?: (pid: number) => void } = {}): Promise<void> {
+  { inventory = processInventory, terminate, platform = process.platform, heldTerminate = terminateWindowsProcess }:
+  { inventory?: Inventory; terminate?: (pid: number) => void; platform?: NodeJS.Platform;
+    heldTerminate?: (entry: ProcessEntry) => Promise<TerminationResult> } = {}): Promise<void> {
   const failures: Error[] = [];
   for (const target of [...descendantsOf(root, rows).reverse(), root]) {
     try {
-      if (sameProcess(target, (await inventory(target.pid)).find(row => row.pid === target.pid))) terminate(target.pid);
+      if (platform === 'win32' && !terminate) {
+        await heldTerminate(target);
+      } else if (sameProcess(target, (await inventory(target.pid)).find(row => row.pid === target.pid))) {
+        if (terminate) terminate(target.pid); else process.kill(target.pid, 'SIGKILL');
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ESRCH') failures.push(new Error(`Could not terminate owned ${target.name} pid ${target.pid}`, { cause: error }));
     }

@@ -41,12 +41,29 @@ test('browser startup preserves a failed connection after successful reclamation
   const f = fixture(), error = new Error('connection failed'); f.deps.connect = async () => { throw error; };
   await expect(startLocalBrowser(f.deps)).rejects.toBe(error); expect(f.events).toEqual(['server close']);
 });
-test('missing launch ownership fails without signalling any process', async () => {
+test('missing launch ownership closes the launched server without signalling by PID', async () => {
   const f = fixture(); f.replace([f.parent]);
-  await expect(startLocalBrowser(f.deps)).rejects.toThrow('launch identity unavailable'); expect(f.events).toEqual([]);
+  await expect(startLocalBrowser(f.deps)).rejects.toThrow('launch identity unavailable'); expect(f.events).toEqual(['server close']);
 });
 test('all contexts are attempted and a graceful close error is preserved after native reclamation', async () => {
   const f = fixture(); f.browser.contexts = () => [{ close: async () => { throw new Error('context broken'); } }, { close: async () => { f.events.push('second context close'); } }];
   const local = await startLocalBrowser(f.deps); await expect(local.dispose()).rejects.toThrow('Browser contexts failed to close');
   expect(f.events).toEqual(['second context close', 'native kill']);
+});
+
+test('failed identity lookup closes the server and preserves the lookup error', async () => {
+  const f = fixture(), failure = new Error('inventory unavailable');
+  f.deps.inventory = async () => { throw failure; };
+  await expect(startLocalBrowser(f.deps)).rejects.toBe(failure);
+  expect(f.events).toEqual(['server close']);
+});
+
+test('identity capture and server-close errors are both retained', async () => {
+  const f = fixture(), failure = new Error('server close failed'); f.replace([f.parent]);
+  f.server.close = async () => { throw failure; };
+  let error: AggregateError | undefined;
+  try { await startLocalBrowser(f.deps); } catch (caught) { error = caught as AggregateError; }
+  expect(error?.errors[0].message).toContain('launch identity unavailable');
+  expect(error?.errors[1].errors).toContain(failure);
+  expect(f.events).not.toContain('native kill');
 });

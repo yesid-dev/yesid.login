@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test, spyOn } from 'bun:test';
 import { ownedProcesses, remainingOwnedProcesses, terminateProcessTree, verifyProcessesGone, waitForProcessExit, waitForProcessesExit, isProcessAlive, type ProcessEntry } from '../e2e/owned-processes.ts';
 const row = (pid: number, parent: number, name = 'chrome.exe', created = '100'): ProcessEntry => ({ pid, parent, name, created });
 const inventory = (rows: ProcessEntry[]) => async (pid?: number) => rows.filter(row => pid === undefined || row.pid === pid);
@@ -84,3 +84,17 @@ test('exit waits acknowledge termination and report every stuck identity', async
 test('a reused browser PID does not confer ownership of its new children', async () => {
   await verifyProcessesGone([row(5, 1)], [row(5, 1, 'chrome.exe', '200'), row(6, 5, 'chrome.exe', '200')], present);
 });
+
+for (const outcome of ['not-found', 'identity-mismatch', 'killed'] as const) {
+  test(`Windows held-handle ${outcome} never falls back to a Node PID signal`, async () => {
+    const entry = row(5, 1); const delegated: ProcessEntry[] = [];
+    const signal = spyOn(process, 'kill').mockImplementation(() => true);
+    try {
+      await terminateProcessTree(entry, [entry], {
+        platform: 'win32', inventory: async () => { throw new Error('Unexpected check-then-kill lookup'); },
+        heldTerminate: async target => { delegated.push(target); return outcome; }
+      });
+      expect(delegated).toEqual([entry]); expect(signal).not.toHaveBeenCalled();
+    } finally { signal.mockRestore(); }
+  });
+}

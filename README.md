@@ -110,8 +110,10 @@ to the first of four free consecutive ports when another development session is 
 Teardown closes browser contexts before the browser and Worker, then audits their owned
 process trees and removes each private OS temp root (for example,
 `C:\Users\<user>\AppData\Local\Temp\yl-e2e-1-<suffix>`). Ownership uses PID and creation
-time: child birth times must be at or after their parent's, and each PID-based termination re-reads that
-identity immediately before signalling. A fresh post-dispose sweep also captures late
+time: child birth times must be at or after their parent's. On Windows, the inventory host
+holds one native process handle while checking birth time and calling Kill, then disposes
+it; a recycled or missing PID receives no kill. POSIX retains its non-atomic fresh-check/
+PID-signal path and the remaining check-to-signal race. A fresh post-dispose sweep also captures late
 launches. An unrecorded orphan with an exited parent has unverified lineage and receives
 no signal. Recycled PIDs and older unrelated processes with stale PPIDs are excluded.
 A five-second cleanup phase can escalate to native termination; warnings include the
