@@ -46,7 +46,10 @@ async function runShard(shard: number): Promise<number> {
   let exitCode = 1;
   try {
     runner = Bun.spawn(['node', '.wrangler/e2e-runner.mjs'], {
-      stdout: 'inherit', stderr: 'inherit', serialization: 'json', ipc() {},
+      stdout: 'inherit', stderr: 'inherit', serialization: 'json',
+      ipc(message) {
+        if (message && typeof message === 'object' && 'type' in message && message.type === 'e2e-cleanup-progress') control?.cleanupProgress();
+      },
       onDisconnect() { if (control) control.ipcDisconnected(); else ipcLost = true; },
       env: { ...process.env, LOGIN_E2E_SHARD: `${shard}/${SHARDS.length}`,
         LOGIN_E2E_PORT: String(basePort + shard - 1),
@@ -64,7 +67,10 @@ async function runShard(shard: number): Promise<number> {
       console.error(`E2E shard ${shard} IPC cleanup failure (child exit code ${exitCode})`, error);
       exitCode ||= 1;
     }
+    const removalStart = performance.now();
     exitCode = removeShardTempDirectory(temp, exitCode);
+    console.info(`timing - shard ${shard} temp removal: ${Math.round(performance.now() - removalStart)} ms`);
+    if (!exitCode) console.info(`cleanup - shard ${shard}: verified temp root removed: ${temp}`);
     console.info(`timing - shard ${shard}/${SHARDS.length}: ${Math.round(performance.now() - start)} ms (including cleanup)`);
   }
   return exitCode;

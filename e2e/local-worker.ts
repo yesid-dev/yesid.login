@@ -16,6 +16,9 @@ export async function startLocalWorker(port: number, startupLimitMs: number) {
     dev: {
       server: { port, hostname: 'localhost' }, inspector: false, remote: false,
       watch: false, persist: false, inferOriginFromRoutes: false,
+      // This standalone fixture has no cross-Worker service bindings. An empty
+      // registry disables global discovery, its file watcher and registration retries.
+      registry: '',
       logLevel: 'error'
     }
   }), local => local.fetch(`http://localhost:${port}/`), startupLimitMs);

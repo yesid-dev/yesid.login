@@ -46,6 +46,10 @@ export function superviseShard(runner: Runner, label: string,
   });
   return {
     exited,
+    cleanupProgress() {
+      if (settled || !timer) return;
+      clearTimeout(timer); timer = undefined; boundCleanup();
+    },
     ipcDisconnected: boundCleanup,
     forward(signal: 'SIGINT' | 'SIGTERM') {
       if (settled) return;

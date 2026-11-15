@@ -35,11 +35,12 @@ export const SHARDS: readonly (readonly ScenarioName[])[] = [
   ['sitesHandoff', 'editorLoading'],
   ['log10Preferences', 'forgivingCodeEntry', 'pendingStorageRecovery', 'accountCorrectness', 'accountStorageBlocked', 'accountNavigation'],
   ['log11Acceptance', 'startupRecovery', 'startupEffectAndIsolation', 'legalInitialFragment', 'legalWithoutJavaScript',
-    'legalLanguageHash', 'analyticsCounting', 'themeAtSendTime', 'legalNavigation', 'signsInWithARealCode', 'refusesAWrongCode',
+    'legalLanguageHash', 'analyticsCounting', 'themeAtSendTime', 'legalNavigation', 'signsInWithARealCode', 'peopleCorrectness', 'refusesAWrongCode',
     'keepsItsPlaceWhenLanguageChanges', 'navbarIsWhole', 'emailSamples'],
-  // S-1/S-5, H-1/H-2 and A-5: invitation establishes the session used by People/Account;
+  // LOG-4's isolated People replies run after shard 3 signs in, without changing fixture data.
+  // S-1/S-5, H-1/H-2 and A-5: invitation establishes the session used by Account;
   // Account changes the address used by the visual matrix. Do not reorder this chain.
-  ['invitationFlow', 'peopleCorrectness', 'expiresInBrowser', 'accountFlow', 'visualMatrix']
+  ['invitationFlow', 'expiresInBrowser', 'accountFlow', 'visualMatrix']
 ];
 
 /** Fail closed when a new scenario has no home, or a scenario would run more than once. */

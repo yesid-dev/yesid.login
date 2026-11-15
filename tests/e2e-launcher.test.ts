@@ -67,6 +67,16 @@ test('normal exit after IPC closure cancels escalation without reporting a failu
   expect(reports).toEqual([]);
 });
 
+test('an interrupted child can advance bounded cleanup phases without raising the idle deadline', async () => {
+  const runner = child();
+  const control = superviseShard(runner, 'fixture', { limitMs: 50, windows: true, report() {} });
+  control.forward('SIGTERM');
+  await wait(30); control.cleanupProgress();
+  await wait(30); runner.finish(143);
+  expect(await control.exited).toBe(143);
+  expect(runner.signals).not.toContain('SIGKILL');
+});
+
 test('repeated signals arm only one force-termination deadline', async () => {
   const runner = child();
   const control = superviseShard(runner, 'fixture', { limitMs: 50, windows: true, report() {} });
