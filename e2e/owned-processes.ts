@@ -4,39 +4,63 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { CLEANUP_LIMIT_MS, closeOwnedResource, reportCleanupProgress } from './lifecycle.ts';
+import { createInventoryChannel } from './inventory-channel.ts';
 
 export type ProcessEntry = { pid: number; parent: number; name: string; created: string };
+export type Inventory = (pid?: number) => Promise<ProcessEntry[]>;
+export type Alive = (entry: ProcessEntry) => Promise<boolean>;
 const execute = promisify(execFile);
-
-// Start the Windows host while the suite starts, so cold shell startup is never teardown work.
 const pwsh = join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', '7', 'pwsh.exe');
-const query = 'Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,Name,CreationDate | ForEach-Object { [pscustomobject]@{pid=$_.ProcessId;parent=$_.ParentProcessId;name=$_.Name;created=$(if($_.CreationDate){$_.CreationDate.ToFileTimeUtc().ToString()}else{""})} } | ConvertTo-Json -Compress';
+const query = `
+[Console]::WriteLine('ready')
+while($null -ne ($line = [Console]::ReadLine())) {
+  $request = $line | ConvertFrom-Json
+  try {
+    if($null -ne $request.pid) {
+      $candidate = $null
+      try {
+        $candidate = [Diagnostics.Process]::GetProcessById([int]$request.pid)
+        $ticks = $candidate.StartTime.ToFileTimeUtc()
+        # CIM birth times have microsecond precision; keep both providers canonical.
+        $created = ($ticks - ($ticks % 10)).ToString()
+        $rows = @([pscustomobject]@{pid=$candidate.Id;parent=0;name=($candidate.ProcessName+'.exe');created=$created})
+      } catch {
+        $reason = $_.Exception
+        while($reason.InnerException) { $reason = $reason.InnerException }
+        if($reason -is [ArgumentException] -or $reason -is [InvalidOperationException] -or ($reason -is [ComponentModel.Win32Exception] -and $reason.NativeErrorCode -eq 87)) { $rows = @() } else { throw }
+      } finally { if($candidate) { $candidate.Dispose() } }
+    } else {
+      $snapshotStarted = [DateTime]::UtcNow.ToFileTimeUtc()
+      $rows = @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,Name,CreationDate | Where-Object {
+        !$_.CreationDate -or $_.CreationDate.ToFileTimeUtc() -le $snapshotStarted
+      } | ForEach-Object {
+        [pscustomobject]@{pid=$_.ProcessId;parent=$_.ParentProcessId;name=$_.Name;created=$(if($_.CreationDate){$_.CreationDate.ToFileTimeUtc().ToString()}else{''})}
+      })
+    }
+    [pscustomobject]@{id=$request.id;rows=$rows} | ConvertTo-Json -Depth 4 -Compress
+  } catch { [pscustomobject]@{id=$request.id;error=$true;rows=@()} | ConvertTo-Json -Compress }
+}`;
 let host: ChildProcessWithoutNullStreams | undefined;
 let resolveReady!: () => void;
 let rejectReady!: (error: Error) => void;
 const ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
 void ready.catch(() => {});
-let pending: { resolve(value: ProcessEntry[]): void; reject(error: Error): void } | undefined;
 let exited: Promise<void> = Promise.resolve();
+const channel = createInventoryChannel(request => host!.stdin.write(JSON.stringify(request) + '\n'));
 
 export function warmProcessInventory(): void {
   if (host || process.platform !== 'win32') return;
-  host = spawn(existsSync(pwsh) ? pwsh : 'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-Command', `[Console]::WriteLine('ready'); while($null -ne [Console]::ReadLine()){ try { ${query} } catch { [Console]::WriteLine('failed') } }`],
+  host = spawn(existsSync(pwsh) ? pwsh : 'powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', query],
     { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   host.stderr.resume();
+  host.stdin.on('error', error => channel.fail(error));
   exited = new Promise<void>(resolve => host!.once('exit', () => resolve()));
-  host.on('error', error => { rejectReady(error); pending?.reject(error); });
+  host.on('error', error => { rejectReady(error); channel.fail(error); });
   host.on('exit', () => {
-    const error = new Error('Process inventory host exited');
-    rejectReady(error); pending?.reject(error);
+    const error = new Error('Process inventory host exited'); rejectReady(error); channel.fail(error);
   });
   createInterface({ input: host.stdout }).on('line', line => {
-    if (line === 'ready') { resolveReady(); return; }
-    try {
-      const rows = JSON.parse(line) as ProcessEntry | ProcessEntry[];
-      pending?.resolve(Array.isArray(rows) ? rows : [rows]);
-    } catch { pending?.reject(new Error('Process inventory host returned invalid metadata')); }
+    if (line === 'ready') resolveReady(); else channel.accept(line);
   });
 }
 
@@ -48,103 +72,146 @@ async function bounded<T>(work: Promise<T>): Promise<T> {
   })]); } finally { clearTimeout(timer); }
 }
 
-/** Read only IDs, image names and creation times, never process arguments or environment. */
-export async function processInventory(): Promise<ProcessEntry[]> {
+/** Full snapshots supply ancestry; targeted native reads supply identity only (parent=0). */
+export async function processInventory(pid?: number): Promise<ProcessEntry[]> {
+  if (pid !== undefined && (!Number.isSafeInteger(pid) || pid <= 0)) throw new Error('Invalid process ID');
   warmProcessInventory();
   if (host) {
-    await bounded(ready);
-    if (pending) throw new Error('Concurrent process inventory request');
-    try { return await bounded(new Promise<ProcessEntry[]>((resolve, reject) => {
-      pending = { resolve, reject }; host!.stdin.write('snapshot\n');
-    })); } finally { pending = undefined; }
+    try { await bounded(ready); } catch (error) { channel.fail(error as Error); throw error; }
+    return channel.request(pid);
   }
-  const { stdout } = await execute('ps', ['-eo', 'pid=,ppid=,comm='], { timeout: CLEANUP_LIMIT_MS });
-  return stdout.trim().split('\n').map(line => {
-    const [pid, parent, ...name] = line.trim().split(/\s+/);
-    return { pid: Number(pid), parent: Number(parent), name: name.join(' ').split('/').pop()!, created: '' };
+  const args = pid === undefined ? ['-eo', 'pid=,ppid=,lstart=,comm='] : ['-p', String(pid), '-o', 'pid=,ppid=,lstart=,comm='];
+  let stdout: string;
+  try { ({ stdout } = await execute('ps', args, { timeout: CLEANUP_LIMIT_MS, env: { ...process.env, LC_ALL: 'C' } })); }
+  catch (error) { if (pid !== undefined && (error as { code?: number; stdout?: string }).code === 1 && !(error as { stdout?: string }).stdout?.trim()) return []; throw error; }
+  return stdout.trim().split('\n').filter(Boolean).map(line => {
+    const match = /^\s*(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.+)$/.exec(line);
+    if (!match || !Number.isFinite(Date.parse(match[3]))) throw new Error('POSIX process birth time unavailable');
+    return { pid: Number(match[1]), parent: Number(match[2]), name: match[4].split('/').pop()!, created: String(Date.parse(match[3])) };
   });
 }
 
 export async function stopProcessInventory(): Promise<void> {
   if (!host) return;
-  await closeOwnedResource(`Process inventory host pid ${host.pid}`, async () => {
-    host!.stdin.end(); await exited;
-  }, async () => { host!.kill('SIGKILL'); await exited; }, () => host!.pid ? waitForProcessExit(host!.pid) : Promise.resolve());
+  const child = host;
+  await closeOwnedResource(`Process inventory host pid ${child.pid}`, async () => {
+    child.stdin.end(); await exited;
+  }, async () => {
+    // ChildProcess.kill uses its owned native handle, not Playwright's PID/shell fallback.
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    await exited;
+  }, () => exited);
 }
 
-function descendantsOf(root: number, rows: ProcessEntry[]): ProcessEntry[] {
-  const descendants = new Set([root]);
+function birth(entry: ProcessEntry): bigint {
+  // Missing metadata fails closed on every platform, including older POSIX inventories.
+  if (!/^\d+$/.test(entry.created)) throw new Error(`Creation time unavailable for ${entry.name} pid ${entry.pid}`);
+  return BigInt(entry.created);
+}
+export function sameProcess(recorded: ProcessEntry, current: ProcessEntry | undefined): boolean {
+  birth(recorded);
+  if (!current) return false;
+  birth(current);
+  return recorded.pid === current.pid && recorded.created === current.created;
+}
+function descendantsOf(root: ProcessEntry, rows: ProcessEntry[], diagnoseMissingParent = false): ProcessEntry[] {
+  birth(root);
+  const current = rows.find(row => row.pid === root.pid);
+  if (!current && !diagnoseMissingParent) return [];
+  if (current && !sameProcess(root, current)) return [];
+  const descendants = new Map([[root.pid, root]]);
   let previous = 0;
   while (previous !== descendants.size) {
     previous = descendants.size;
-    for (const row of rows) if (descendants.has(row.parent)) descendants.add(row.pid);
+    for (const row of rows) {
+      const parent = descendants.get(row.parent);
+      if (parent && !descendants.has(row.pid) && birth(row) >= birth(parent)) descendants.set(row.pid, row);
+    }
   }
-  return rows.filter(row => descendants.has(row.pid) && row.pid !== root);
+  return rows.filter(row => descendants.has(row.pid) && row.pid !== root.pid);
 }
-
-export function ownedProcesses(root: number, rows: ProcessEntry[]): ProcessEntry[] {
-  const descendants = descendantsOf(root, rows);
+export function ownedProcesses(root: number | ProcessEntry, rows: ProcessEntry[]): ProcessEntry[] {
+  const identity = typeof root === 'number' ? rows.find(row => row.pid === root) : root;
+  if (!identity) throw new Error(`Process root ${root} is missing from the ownership inventory`);
+  const descendants = descendantsOf(identity, rows);
   const resources = descendants.filter(row => /^(chrome(?:[-_].*)?|chromium(?:[-_].*)?|headless_shell|workerd)(\.exe)?$/i.test(row.name));
-  const owned = new Set(resources.map(row => row.pid));
-  for (const resource of resources) for (const child of descendantsOf(resource.pid, rows)) owned.add(child.pid);
-  return descendants.filter(row => owned.has(row.pid));
+  return mergeOwnedProcesses(resources, ...resources.map(row => descendantsOf(row, rows)));
+}
+export function mergeOwnedProcesses(...groups: ProcessEntry[][]): ProcessEntry[] {
+  return [...new Map(groups.flat().map(row => [`${row.pid}:${row.created}`, row])).values()];
+}
+export function remainingOwnedProcesses(owned: ProcessEntry[], rows: ProcessEntry[]): ProcessEntry[] {
+  const remaining: ProcessEntry[][] = [owned.filter(before => sameProcess(before, rows.find(now => now.pid === before.pid)))];
+  for (const before of owned) remaining.push(descendantsOf(before, rows));
+  return mergeOwnedProcesses(...remaining);
 }
 
-/** Use native termination for each owned PID; do not start taskkill during teardown. */
-export function terminateProcessTree(root: number, rows: ProcessEntry[], terminate: (pid: number) => void = pid => { process.kill(pid, 'SIGKILL'); }): void {
+/** Unknown children of an exited parent are ambiguous, never authority to send a signal. */
+function unverifiedLineage(owned: ProcessEntry[], rows: ProcessEntry[]): ProcessEntry[] {
+  const known = new Set(remainingOwnedProcesses(owned, rows).map(row => `${row.pid}:${row.created}`));
+  return mergeOwnedProcesses(...owned.map(root => descendantsOf(root, rows, true)))
+    .filter(row => !known.has(`${row.pid}:${row.created}`));
+}
+
+/** Re-read each target immediately before signalling; stale/recycled identities are never killed. */
+export async function terminateProcessTree(root: ProcessEntry, rows: ProcessEntry[],
+  { inventory = processInventory, terminate = (pid: number) => { process.kill(pid, 'SIGKILL'); } }:
+  { inventory?: Inventory; terminate?: (pid: number) => void } = {}): Promise<void> {
   const failures: Error[] = [];
-  for (const pid of [...descendantsOf(root, rows).map(row => row.pid).reverse(), root]) {
-    try { terminate(pid); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') failures.push(new Error(`Could not terminate owned pid ${pid}`, { cause: error }));
+  for (const target of [...descendantsOf(root, rows).reverse(), root]) {
+    try {
+      if (sameProcess(target, (await inventory(target.pid)).find(row => row.pid === target.pid))) terminate(target.pid);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') failures.push(new Error(`Could not terminate owned ${target.name} pid ${target.pid}`, { cause: error }));
     }
   }
   if (failures.length) throw new AggregateError(failures, 'Owned process termination failed');
 }
 
-export function remainingOwnedProcesses(owned: ProcessEntry[], rows: ProcessEntry[]): ProcessEntry[] {
-  const remaining = owned.filter(before => rows.some(now => now.pid === before.pid && now.created === before.created));
-  // A browser may spawn another renderer after the first snapshot. Parent IDs survive exit.
-  for (const before of owned) {
-    const current = rows.find(row => row.pid === before.pid);
-    if (current && current.created !== before.created) continue;
-    for (const descendant of descendantsOf(before.pid, rows)) {
-      if (!remaining.some(row => row.pid === descendant.pid)) remaining.push(descendant);
-    }
-  }
-  return remaining;
-}
-
-export function isProcessAlive(pid: number): boolean {
-  try { process.kill(pid, 0); return true; }
+export async function isProcessAlive(entry: ProcessEntry,
+  { inventory = processInventory, probe = (pid: number) => { process.kill(pid, 0); } }:
+  { inventory?: Inventory; probe?: (pid: number) => void } = {}): Promise<boolean> {
+  if (!sameProcess(entry, (await inventory(entry.pid)).find(row => row.pid === entry.pid))) return false;
+  try { probe(entry.pid); return true; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false; throw error; }
 }
-
-/** Wait for the OS to acknowledge one termination, without reissuing the signal. */
-export async function waitForProcessExit(pid: number, limitMs = CLEANUP_LIMIT_MS, alive = isProcessAlive): Promise<void> {
+export async function waitForProcessExit(entry: ProcessEntry, limitMs = CLEANUP_LIMIT_MS, alive: Alive = isProcessAlive): Promise<void> {
   reportCleanupProgress();
   const end = performance.now() + limitMs;
-  while (alive(pid)) {
-    if (performance.now() >= end) throw new Error(`Owned pid ${pid} is still alive`);
+  while (await alive(entry)) {
+    if (performance.now() >= end) throw new Error(`Owned ${entry.name} pid ${entry.pid} is still alive`);
     await new Promise(resolve => setTimeout(resolve, 10));
   }
 }
-
-export function verifyProcessesGone(owned: ProcessEntry[], rows: ProcessEntry[], alive: (pid: number) => boolean = () => true): void {
-  const remaining = remainingOwnedProcesses(owned, rows).filter(row => alive(row.pid));
-  if (remaining.length) throw new Error(`Owned processes remain: ${remaining.map(row => `${row.name} pid ${row.pid}`).join(', ')}`);
+export async function waitForProcessesExit(entries: ProcessEntry[], wait = waitForProcessExit): Promise<void> {
+  const results = await Promise.allSettled(entries.map(entry => wait(entry)));
+  const errors = results.flatMap((result, index) => result.status === 'rejected'
+    ? [new Error(`${entries[index].name} pid ${entries[index].pid} exit is unverified`, { cause: result.reason })] : []);
+  if (errors.length) throw new AggregateError(errors, errors.map(error => error.message).join('; '));
+}
+export async function verifyProcessesGone(owned: ProcessEntry[], rows: ProcessEntry[], alive: Alive = isProcessAlive): Promise<void> {
+  const remaining = remainingOwnedProcesses(owned, rows);
+  const uncertain = unverifiedLineage(owned, rows);
+  const candidates = mergeOwnedProcesses(remaining, uncertain);
+  const results = await Promise.allSettled(candidates.map(entry => alive(entry)));
+  const failures = results.flatMap((result, index) => result.status === 'rejected' || result.value
+    ? [new Error(`${candidates[index].name} pid ${candidates[index].pid} remains live or unverified${uncertain.includes(candidates[index]) ? ' (ownership lineage unverified)' : ''}`, { cause: result.status === 'rejected' ? result.reason : undefined })] : []);
+  if (failures.length) throw new AggregateError(failures, failures.map(error => error.message).join('; '));
 }
 
-/** Wrangler owns multiple workerd processes; a slow dispose must reclaim every one. */
-export async function closeWorkerProcesses(close: () => Promise<unknown>, owned: ProcessEntry[] | undefined): Promise<void> {
+export async function closeWorkerProcesses(close: () => Promise<unknown>, owned: ProcessEntry[] | undefined,
+  { inventory = processInventory, terminate = terminateProcessTree, wait = waitForProcessesExit, limitMs = CLEANUP_LIMIT_MS } = {}): Promise<void> {
+  const workers = owned?.filter(row => /^workerd(\.exe)?$/i.test(row.name));
   await closeOwnedResource('Local Worker', close, async () => {
-    if (!owned) throw new Error('Local Worker ownership inventory is unavailable');
-    const rows = await processInventory();
-    const workers = remainingOwnedProcesses(owned, rows).filter(row => /^workerd(\.exe)?$/i.test(row.name) && isProcessAlive(row.pid));
-    for (const worker of workers) terminateProcessTree(worker.pid, rows);
-    await Promise.all(workers.map(worker => waitForProcessExit(worker.pid)));
+    if (!workers) throw new Error('Local Worker ownership inventory is unavailable');
+    const rows = await inventory();
+    const targets = remainingOwnedProcesses(workers, rows);
+    const results = await Promise.allSettled(targets.map(worker => terminate(worker, rows)));
+    const failures = results.filter(result => result.status === 'rejected');
+    if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Worker process termination failed');
+    await wait(targets);
   }, async () => {
-    if (!owned) throw new Error('Local Worker exit cannot be verified without its ownership inventory');
-    await Promise.all(owned.filter(row => /^workerd(\.exe)?$/i.test(row.name)).map(worker => waitForProcessExit(worker.pid)));
-  });
+    if (!workers) throw new Error('Local Worker exit cannot be verified without its ownership inventory');
+    await wait(workers);
+  }, limitMs);
 }

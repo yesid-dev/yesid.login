@@ -17,7 +17,8 @@ import { chromium, type Page } from 'playwright-core';
 import { startLocalBrowser } from './local-browser.ts';
 import { startLocalWorker } from './local-worker.ts';
 import { cleanup, cleanupStarted } from './lifecycle.ts';
-import { ownedProcesses, processInventory, closeWorkerProcesses, stopProcessInventory, warmProcessInventory, remainingOwnedProcesses, terminateProcessTree, waitForProcessExit, isProcessAlive, verifyProcessesGone, type ProcessEntry } from './owned-processes.ts';
+import { closeWorkerProcesses, warmProcessInventory } from './owned-processes.ts';
+import { closeResourceSet } from './cleanup-resources.ts';
 
 assertShardAssignment(SCENARIO_NAMES, SHARDS);
 
@@ -999,34 +1000,10 @@ async function analyticsCounting(browser: Awaited<ReturnType<typeof chromium.lau
 let browserLaunch: ReturnType<typeof startLocalBrowser> | undefined;
 let localBrowser: Awaited<ReturnType<typeof startLocalBrowser>> | undefined;
 let closing: Promise<void> | undefined;
-const closeResources = () => closing ??= (async () => {
-  const failures: unknown[] = [];
-  let owned: ProcessEntry[] | undefined;
-  try { owned = ownedProcesses(process.pid, await processInventory()); }
-  catch (error) { failures.push(new Error('Could not inventory owned Chromium/workerd processes', { cause: error })); }
-  try { await timed('cleanup browser', async () => localBrowser ? localBrowser.dispose() : cleanup([() => cleanupStarted(browserLaunch, launched => launched.dispose())])); }
-  catch (error) { failures.push(error); }
-  try { await timed('cleanup Worker', () => closeWorkerProcesses(async () => worker ? worker.dispose() : cleanupStarted(workerStart, started => started.dispose()), owned)); }
-  catch (error) { failures.push(error); }
-  try {
-    if (owned) {
-      const rows = await processInventory();
-      const remaining = remainingOwnedProcesses(owned, rows).filter(row => isProcessAlive(row.pid));
-      if (remaining.length) {
-        console.info(`cleanup - terminating orphaned owned processes: ${remaining.map(row => `${row.name} pid ${row.pid}`).join(', ')}`);
-        for (const row of remaining) {
-          try { terminateProcessTree(row.pid, rows); }
-          catch (error) { failures.push(error); }
-        }
-        await Promise.all(remaining.map(row => waitForProcessExit(row.pid)));
-      }
-      verifyProcessesGone(owned, remaining.length ? await processInventory() : rows, isProcessAlive);
-      console.info(`cleanup - verified 0 owned Chromium/workerd processes (${owned.length} tracked)`);
-    }
-  } catch (error) { failures.push(error); }
-  try { await stopProcessInventory(); } catch (error) { failures.push(error); }
-  if (failures.length) throw new AggregateError(failures, 'Resource cleanup failed');
-})();
+const closeResources = () => closing ??= closeResourceSet({
+  browser: () => timed('cleanup browser', async () => localBrowser ? localBrowser.dispose() : cleanup([() => cleanupStarted(browserLaunch, launched => launched.dispose())])),
+  worker: owned => timed('cleanup Worker', () => closeWorkerProcesses(async () => worker ? worker.dispose() : cleanupStarted(workerStart, started => started.dispose()), owned))
+});
 async function stopRun(reason: string, exitCode: number) {
   clearTimeout(watchdog);
   console.error(reason);

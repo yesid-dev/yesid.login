@@ -85,7 +85,30 @@ and its measured headroom. A persistence folder is never shared between processe
 
 ## Cleanup verification
 
-Review follow-up: cleanup attempts the browser and Worker concurrently, including pending launches, under a five-second bound. The watchdog and forwarded interruption use the same cleanup. Startup creation and its first fetch share the original one-minute deadline; failure disposal is bounded too. On Windows, the launcher relays signals over IPC so Node can clean up before exiting. Other platforms receive the native signal.
+The earlier concurrent five-second cleanup was replaced in PR #55 by ordered, bounded
+phases: close contexts/browser, dispose the Worker, then sweep late/orphaned owned processes
+and verify exit before the launcher removes its private temp root. A warning names any
+escalated resource and the graceful, force and verification durations. Limits remain five
+seconds per phase, seven seconds for parent idle supervision and ten minutes per shard.
+
+Process-tree edges require `BigInt(child.created) >= BigInt(parent.created)`. Missing birth
+metadata fails closed, including on POSIX (whose inventory now includes process start time).
+A full snapshot excludes processes born after collection began. An unknown orphan whose
+parent has exited is not inferred to be owned from that stale PPID; live ambiguous lineage
+fails verification without a signal. Previously recorded child identities remain reclaimable.
+Each PID-based termination immediately re-reads the target's PID and birth time. The browser
+root is recorded at launch and also guarded by its ChildProcess exit/signal state; escalation
+does not call Playwright's `server.kill()`, whose Windows implementation invokes `taskkill`
+through a shell. Final ownership combines initial and fresh post-dispose inventories so a
+late launch cannot disappear from the audit. Exit waits report every stuck PID together.
+Windows inventory requests have sequence IDs, and a timed-out host cannot serve later requests.
+Full snapshots use CIM for ancestry; targeted identity checks read native process start time,
+canonicalized to CIM microsecond precision, without enumerating the machine per signal.
+The Windows inventory host itself shuts down through its guarded native ChildProcess handle.
+
+Paths in public examples use `<user>`, such as
+`C:\Users\<user>\AppData\Local\Temp\yl-e2e-1-<suffix>`. No cleanup target comes from a
+machine-wide name-only search, and no other suite's or desktop browser's processes are owned.
 
 Cleanup measurements use each launch's descendants and a fresh dedicated temp directory. Counts exclude pre-existing processes and folders. W = workerd processes, C = Chromium processes including renderers, T = runtime-created temp directories inside a fresh empty measurement container. Descendant PIDs and creation times identify each launch's processes; these are not machine-wide counts.
 

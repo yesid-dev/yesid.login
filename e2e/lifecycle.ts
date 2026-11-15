@@ -12,22 +12,30 @@ export function reportCleanupProgress(): void {
 export async function closeOwnedResource(name: string, close: () => Promise<unknown>,
   force: () => Promise<unknown>, verify: () => Promise<unknown>, limitMs = CLEANUP_LIMIT_MS): Promise<void> {
   const expired = new Error(`${name} graceful close exceeded its deadline`);
-  let failure: unknown;
-  let failed = false;
-  try { await deadline(close, limitMs, expired); }
-  catch (error) {
-    if (error !== expired) { failed = true; failure = error; }
-    console.info(`cleanup - ${name}: escalating to forced termination`);
-    const forceExpired = new Error(`${name} force termination exceeded its deadline`);
-    try { await deadline(force, limitMs, forceExpired); }
-    catch (forceError) {
-      if (forceError !== forceExpired) throw new AggregateError([error, forceError], `${name} force termination failed: ${String(forceError)}`);
-      console.info(`cleanup - ${name}: force completion pending; verifying process exit`);
+  const durations = { graceful: 0, force: 0, verification: 0 };
+  let failure: unknown, failed = false, escalated = false, verified = false;
+  const phase = async (key: keyof typeof durations, work: () => Promise<unknown>, message: string | Error) => {
+    const start = performance.now();
+    try { await deadline(work, limitMs, message); }
+    finally { durations[key] = Math.round(performance.now() - start); }
+  };
+  try {
+    try { await phase('graceful', close, expired); }
+    catch (error) {
+      escalated = true;
+      if (error !== expired) { failed = true; failure = error; }
+      const forceExpired = new Error(`${name} force termination exceeded its deadline`);
+      try { await phase('force', force, forceExpired); }
+      catch (forceError) {
+        if (forceError !== forceExpired) throw new AggregateError([error, forceError], `${name} force termination failed: ${String(forceError)}`);
+      }
     }
+    try { await phase('verification', verify, `${name} exit verification exceeded its deadline`); verified = true; }
+    catch (error) { throw new Error(`${name} remains unverified: ${String(error)}`, { cause: error }); }
+    if (failed) throw failure;
+  } finally {
+    if (escalated) console.warn(`cleanup - ${name}: graceful ${durations.graceful} ms; force ${durations.force} ms; verification ${durations.verification} ms; ${verified ? 'native exit verified' : 'exit unverified'}`);
   }
-  try { await deadline(verify, limitMs, `${name} exit verification exceeded its deadline`); }
-  catch (error) { throw new Error(`${name} remains unverified: ${String(error)}`, { cause: error }); }
-  if (failed) throw failure;
 }
 
 async function deadline<T>(work: () => Promise<T>, limitMs: number, message: string | Error): Promise<T> {
