@@ -25,3 +25,12 @@ test('shard selection validates numerator and denominator', () => {
 test('the real browser scenarios are all assigned exactly once', () => {
   expect(() => assertShardAssignment(SCENARIO_NAMES, SHARDS)).not.toThrow();
 });
+
+test('S-1/S-5 H-1/H-2 A-5: balancing retains the real-session dependency chains', () => {
+  const matrix = SHARDS.find(shard => shard.includes('visualMatrix'))!;
+  expect(matrix.filter(name => ['invitationFlow', 'expiresInBrowser', 'accountFlow', 'visualMatrix'].includes(name)))
+    .toEqual(['invitationFlow', 'expiresInBrowser', 'accountFlow', 'visualMatrix']);
+  const people = SHARDS.find(shard => shard.includes('peopleCorrectness'))!;
+  expect(people.indexOf('signsInWithARealCode')).toBeGreaterThanOrEqual(0);
+  expect(people.indexOf('signsInWithARealCode')).toBeLessThan(people.indexOf('peopleCorrectness'));
+});

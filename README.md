@@ -107,6 +107,19 @@ The build refuses Node versions other than 24 LTS. Bun runs installation and tes
 The browser suite uses four local ports starting at localhost:8799; set `LOGIN_E2E_PORT`
 to the first of four free consecutive ports when another development session is using them.
 
+Teardown closes browser contexts before the browser and Worker, then audits their owned
+process trees and removes each private OS temp root (for example,
+`C:\Users\<user>\AppData\Local\Temp\yl-e2e-1-<suffix>`). Ownership uses PID and creation
+time: child birth times must be at or after their parent's. On Windows, the inventory host
+holds one native process handle while checking birth time and calling Kill, then disposes
+it; a recycled or missing PID receives no kill. POSIX retains its non-atomic fresh-check/
+PID-signal path and the remaining check-to-signal race. A fresh post-dispose sweep also captures late
+launches. An unrecorded orphan with an exited parent has unverified lineage and receives
+no signal. Recycled PIDs and older unrelated processes with stale PPIDs are excluded.
+A five-second cleanup phase can escalate to native termination; warnings include the
+resource and phase durations. Success requires verified exit and temp removal; missing
+identity metadata, close/kill errors and surviving processes remain failures.
+
 The exact v0.42.0 UI release uses its explicit peers `@yesid/tokens`, `@yesid/motion`,
 `@yesid/seo-kit`, Svelte 5.57.2 and Satori 0.33.5. CSS order is tokens, Tailwind,
 UI base; the copied self-hosted font stylesheet loads separately. No SvelteKit router is needed.
