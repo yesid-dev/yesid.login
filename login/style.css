@@ -13,7 +13,8 @@ main { width: min(100%, 28rem); margin: auto; padding-block: 1rem; }
 .construction-ground { position: relative; height: var(--ground-height); flex-shrink: 0; overflow: clip; }
 .brand-cluster { display: inline-flex; align-items: center; gap: 0.5rem; }
 .brand-product { display: inline-flex; align-items: center; min-block-size: var(--size-tap-min); font-family: var(--font-heading); font-size: 1.5rem; font-weight: 700; letter-spacing: -0.01em; color: var(--foreground); border-radius: var(--radius-sm); }
-.navbar-brand { flex-shrink: 0; gap: 0.375rem; font-size: 1.125rem; }
+/* The pill's one split space, the same on both sides of the divider as every navbar | (v0.47.0). */
+.navbar-brand { flex-shrink: 0; gap: var(--nav-split-space, 0.5rem); font-size: 1.125rem; }
 .navbar-brand .brand-product { font-size: 1.125rem; }
 .brand-product:hover { color: var(--primary); }
 .brand-divider { width: 2px; height: 18px; flex-shrink: 0; background: var(--border-brand); }

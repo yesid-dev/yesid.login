@@ -12,8 +12,12 @@ export async function log11Chrome(page: Page, name: string, check: Check) {
     const box = el.getBoundingClientRect();
     const divider = el.querySelector('.brand-divider')!;
     const d = divider.getBoundingClientRect();
+    const before = divider.previousElementSibling!.getBoundingClientRect();
+    const after = divider.nextElementSibling!.getBoundingClientRect();
+    const split = parseFloat(getComputedStyle(el).getPropertyValue('--nav-split-space'));
+    const splitGaps = [d.left - before.right, after.left - d.right];
     const controls = [...el.querySelectorAll('[data-slot="theme-toggle"], [data-slot="language-toggle"]')];
-    return { fits: box.left >= 0 && box.right <= innerWidth, divider: d.width > 0 && d.height > 0
+    return { split, splitGaps, fits: box.left >= 0 && box.right <= innerWidth, divider: d.width > 0 && d.height > 0
       && getComputedStyle(divider).backgroundColor !== 'rgba(0, 0, 0, 0)',
       controls: controls.length === 2 && controls.every(control => {
         const r = control.getBoundingClientRect();
@@ -21,6 +25,7 @@ export async function log11Chrome(page: Page, name: string, check: Check) {
       }), unlabeled: [...el.querySelectorAll('.fallback-control-label')].every(label => getComputedStyle(label).display === 'none') };
   });
   check(`LOG-11 divider and navbar controls fit ${name}`, geometry.fits && geometry.divider && geometry.controls && geometry.unlabeled, JSON.stringify(geometry));
+  check(`LOG-14 navbar divider uses shared equal spacing ${name}`, geometry.splitGaps.every(gap => Math.abs(gap - geometry.split) < 0.6), JSON.stringify(geometry));
   const language = page.getByTestId('language-toggle');
   const lang = await page.locator('html').getAttribute('lang') as 'en' | 'fr' | 'es';
   check(`LOG-11 language spoken by name ${name}`, (await language.getAttribute('aria-label'))!.includes({ en: 'English', fr: 'Français', es: 'Español' }[lang]));
