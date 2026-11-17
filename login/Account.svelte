@@ -108,10 +108,10 @@
 <svelte:head><title>{text.title} | yesid.dev</title></svelte:head>
 <Chrome {locale}>
   <main id="main" tabindex="-1">
-    <a href="/">{text.back}</a><Masthead heading={text.title} lede={text.lead} />
-    <p class="label-station">{step === 'ask' ? '1 / 3' : step === 'current' ? '2 / 3' : '3 / 3'} · {steps[step === 'ask' ? 0 : step === 'current' ? 1 : 2]}</p>
+    <Masthead heading={text.title} lede={text.lead} tape={false} /><a href="/">{text.back}</a>
+    <p class="task-step">{step === 'ask' ? '1 / 3' : step === 'current' ? '2 / 3' : '3 / 3'} · {steps[step === 'ask' ? 0 : step === 'current' ? 1 : 2]}</p>
     {#if step !== 'done'}
-      <Card class="form-card"><form onsubmit={event => { event.preventDefault(); void submit(); }}>
+      <Card edge="neutral" textSize="inherit" class="form-card"><form onsubmit={event => { event.preventDefault(); void submit(); }}>
         {#if step === 'ask'}<label for="email">{common.email}</label><input id="email" name="email" type="email" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="email" disabled={busy || !restored} required bind:this={emailInput} bind:value={email} oninput={event => { email = event.currentTarget.value; if (restored) retain('address'); }} />
         {:else}
           <p class="confirm-address">{text.current} {currentEmail}</p>

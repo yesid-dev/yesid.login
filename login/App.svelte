@@ -5,6 +5,7 @@
   import { readStep, saveStep, clearStep } from './step.ts';
   import { Button } from '@yesid/ui/button';
   import { copy, throttleMessage } from './copy.ts';
+  import { legalLabels } from './legal/labels.ts';
   import { createController, popupHandover, type State } from './controller.ts';
   import { initialLocale } from './preferences.ts';
 
@@ -121,17 +122,17 @@
 
 <Chrome {locale} center>
   <main id="main" tabindex="-1">
-    {#if view.step === 'ask' || view.step === 'enter'}<p class="label-station">{view.step === 'ask' ? text.step1 : text.step2}</p>{/if}
     {#if view.step !== 'loadingSites' && view.step !== 'sitesFailure'}<h1 tabindex="-1" bind:this={heading}>{screenTitle}</h1>{/if}
+{#if view.step === 'ask' || view.step === 'enter'}<p class="task-step">{view.step === 'ask' ? text.step1 : text.step2}</p>{/if}
     {#if view.step === 'ask' || view.step === 'enter'}<p class="lead">{view.step === 'enter' ? text.codeLead.replace('{email}', email.trim()) : text.lead}</p>{/if}
     {#if view.step === 'ask'}
-      <Card class="form-card"><form onsubmit={send}>
+      <Card edge="neutral" textSize="inherit" class="form-card"><form onsubmit={send}>
         <label for="email">{text.email}</label>
         <input id="email" name="email" type="email" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="email" required bind:value={email} bind:this={emailInput} />
         <Button type="submit" size="cta" disabled={view.busy}>{view.busy && view.operation === 'send' ? text.requesting : text.send}</Button>
       </form></Card>
     {:else if view.step === 'enter'}
-      <Card class="form-card"><form onsubmit={event => { event.preventDefault(); void verify(); }}>
+      <Card edge="neutral" textSize="inherit" class="form-card"><form onsubmit={event => { event.preventDefault(); void verify(); }}>
         <label for="code">{text.code}</label>
         <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" aria-describedby={fieldMessage ? "code-error" : undefined} aria-invalid={fieldMessage ? "true" : undefined} bind:value={code} bind:this={codeInput} />
         {#key codeAttempt}
@@ -148,7 +149,7 @@
       {#if view.message === 'reopen'}<a href="/">{text.title}</a>{/if}
     {:else}
       {#if view.sites.length}
-        <Card class="form-card"><div class="sites">
+        <Card edge="neutral" textSize="inherit" class="form-card"><div class="sites">
           {#each view.switching ? view.sites.filter(site => site.slug === controller.requested) : view.sites as site}
             <div>
               <p>{site.label}</p>
@@ -162,5 +163,6 @@
       {#if view.empty}<Button disabled={view.busy} onclick={() => controller.switchSite()}>{text.signOut}</Button>{/if}
     {/if}
     <p id="sign-in-message" class="message" role="status" tabindex="-1" bind:this={messageElement}>{view.step === 'sites' && (view.message === 'switchNotice' || view.message === 'editorStorage') ? '' : statusMessage} {storageMessage}</p>
+    <div class="task-help"><p>{text.eyebrow}</p><a href="mailto:contact@yesid.dev">{text.footerContact}</a><a href={"/legal/privacy?lang=" + locale}>{legalLabels[locale].privacy}</a></div>
   </main>
 </Chrome>

@@ -6,11 +6,11 @@ export async function log11Chrome(page: Page, name: string, check: Check) {
   const pill = page.getByTestId('nav-pill');
   check(`LOG-11 no menu control ${name}`, await page.getByTestId('nav-menu-toggle').count() === 0
     && await page.getByRole('button', { name: 'Menu', exact: true }).count() === 0);
-  check(`LOG-11 house and product brand ${name}`, await pill.getByRole('link', { name: /^yesid\s*\.$/ }).isVisible()
+  check(`LOG-11 house and product brand ${name}`, await pill.getByRole('link', { name: /^yesid/ }).isVisible()
     && await pill.getByRole('link', { name: 'Login', exact: true }).isVisible(), await pill.ariaSnapshot());
   const geometry = await pill.evaluate(el => {
     const box = el.getBoundingClientRect();
-    const divider = el.querySelector('.brand-divider')!;
+    const divider = el.querySelector('[data-slot="product-brand"] > [aria-hidden="true"]')!;
     const d = divider.getBoundingClientRect();
     const before = divider.previousElementSibling!.getBoundingClientRect();
     const after = divider.nextElementSibling!.getBoundingClientRect();

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from 'svelte';
   import { SiteFooter, SiteHeader } from '@yesid/ui/layout';
-  import { ConstructionProps, Wordmark, createNavigationLifecycle } from '@yesid/ui/brand';
+  import { ConstructionProps, ProductBrand, Wordmark, createNavigationLifecycle } from '@yesid/ui/brand';
   import { theme } from '@yesid/ui/state';
   import { legalLabels } from './legal/labels.ts';
   import { copy, locales, type Locale } from './copy.ts';
@@ -29,17 +29,16 @@
   });
   $effect(() => { document.documentElement.lang = locale; savePreferences(locale, theme.current); });
 </script>
-<div class="site-grid circuit-grid" aria-hidden="true"></div>
-<div class="login-chrome">
+<div class="login-chrome" data-register="task">
   <SiteHeader {navigation} {home} wordmarkAutoPlay={false} links={[]} menuItems={[]}
     labels={{ openMenu: 'Menu', closeMenu: 'Menu', menu: 'Menu', theme: text.theme, menuFooter: '', skipToContent: text.skip }}
     language={{ locale, locales, href: languageHref, label: text.language, names: { fr: 'Français', en: 'English', es: 'Español' }, reload: true }}>
     {#snippet brand()}
-      <span class="brand-cluster navbar-brand"><Wordmark href="https://yesid.dev" external autoPlay={false} animate={false} /><span class="brand-divider" aria-hidden="true"></span><a class="brand-product" href={home}>Login</a></span>
+      <ProductBrand product="Login" href={home} houseHref="https://yesid.dev" houseExternal houseLabel={text.brand} class="navbar-brand" />
     {/snippet}
   </SiteHeader>
   <div class="shell" class:shell-center={center}>{@render children()}</div>
-  {#if location.pathname === '/'}<div class="construction-ground" aria-hidden="true"><ConstructionProps layout="spread" floodlight /></div>{/if}
+  {#if location.pathname === '/'}<div class="construction-ground" data-register="expressive" aria-hidden="true"><ConstructionProps layout="spread" floodlight /></div>{/if}
   <SiteFooter tagline={text.footerTagline} {groups}>
     {#snippet brand()}
       <span class="brand-cluster"><Wordmark href="https://yesid.dev" external animate={false} class="text-lg" /><span class="brand-divider" aria-hidden="true"></span><a class="brand-product" href={home}>login</a></span>

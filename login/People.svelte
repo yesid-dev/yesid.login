@@ -76,22 +76,22 @@
 <svelte:head><title>{text.title} | yesid.dev</title></svelte:head>
 <Chrome {locale}>
   <main id="main" class="wide-page" tabindex="-1" aria-busy={busy}>
-    {#if allowed || busy}<a href={'/' + slug + '/'}>{text.back}</a><Masthead heading={text.title} lede={extra[0]} />{/if}
+    {#if allowed || busy}<Masthead heading={text.title} lede={extra[0]} tape={false} /><a href={'/' + slug + '/'}>{text.back}</a>{/if}
     {#if allowed}
-      <div class="people-layout"><aside class="people-add"><Card class="form-card">{#if adding}<div role="group" aria-label={labels.confirm}><p>{labels.add}</p><p class="confirm-address">{email.trim()}?</p><Button size="cta" disabled={busy} onclick={() => change('POST')}>{labels.confirm}</Button> <Button size="cta" variant="outline" onclick={() => { adding = false; }}>{labels.back}</Button></div>{:else}<form onsubmit={event => { event.preventDefault(); startAction(); adding = true; }}>
-        <label for="email">{common.email}</label><input id="email" name="email" type="email" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off" required maxlength="254" bind:value={email} />
-        <Button size="cta" type="submit" disabled={busy}>{text.add}</Button>
-      </form>{/if}</Card><Button href={"/account?site=" + slug + "&lang=" + locale} variant="outline" size="cta">{labels.account}</Button><Button wrap href={"/?site=" + slug + "&switch=1&lang=" + locale} variant="outline" size="cta">{common.switchWebsites}</Button></aside><section aria-label={text.title}><p>{text.roleHelp}</p><p id="people-count" tabindex="-1" class="label-station">{peopleCount(members.length)}</p>
-      <ul class="people-list">
+      <div class="people-layout"><section aria-label={text.title}><p>{text.roleHelp}</p><p id="people-count" tabindex="-1" class="label-station">{peopleCount(members.length)}</p>
+      <Card edge="neutral" textSize="inherit" class="member-list"><ul class="people-list" role="list">
         {#each members as member (member.id)}
-          <li><Card class="person-card"><div class="person"><strong>{member.email}</strong><div class="person-badges"><Badge variant="outline" size="sm">{text[member.role]}</Badge><span class="person-status"><StatusDot color={member.status === "active" ? "green" : member.status === "expired" ? "stop" : "caution"} />{labels[member.status]}</span></div><span class="person-meta">{member.lastEdit ? labels.last + ": " + last(member.lastEdit) : text.never}</span></div>
+          <li><div class="person-row"><div class="person"><strong>{member.email}</strong><div class="person-badges"><Badge variant="outline" size="sm">{text[member.role]}</Badge><span class="person-status"><StatusDot color={member.status === "active" ? "green" : member.status === "expired" ? "stop" : "caution"} />{labels[member.status]}</span></div><span class="person-meta">{member.lastEdit ? labels.last + ": " + last(member.lastEdit) : text.never}</span></div>
             {#if member.role === 'employee'}<div class="person-actions">{#if member.status === 'expired'}<Button size="cta" disabled={busy} onclick={() => renew(member.email)}>{extra[1]}<span class="sr-only"> {member.email}</span></Button>{/if}<Button size="cta" variant="outline" disabled={busy} onclick={(event: MouseEvent & { currentTarget: HTMLButtonElement }) => askRemove(member, event.currentTarget)}>{text.remove}<span class="sr-only"> {member.email}</span></Button></div>{/if}
-          </Card>
+          </div>
           {#if removing?.id === member.id}
             <div id="remove-question" tabindex="-1" role="group" aria-labelledby="remove-prompt" class="confirmation"><p id="remove-prompt">{text.confirm} <strong>{member.email}</strong></p><Button size="cta" disabled={busy} onclick={() => change('DELETE', member.id)}>{text.remove}</Button> <Button size="cta" variant="outline" disabled={busy} onclick={cancelRemove}>{text.cancel}</Button></div>
           {/if}</li>
         {/each}
-      </ul>{#if !members.length}<Card class="form-card"><p>{extra[2]}</p></Card>{/if}</section></div>
+      </ul>{#if !members.length}<p>{extra[2]}</p>{/if}</Card></section><aside class="people-add"><Card edge="neutral" textSize="inherit" class="form-card">{#if adding}<div role="group" aria-label={labels.confirm}><p>{labels.add}</p><p class="confirm-address">{email.trim()}?</p><Button size="cta" disabled={busy} onclick={() => change('POST')}>{labels.confirm}</Button> <Button size="cta" variant="outline" onclick={() => { adding = false; }}>{labels.back}</Button></div>{:else}<form onsubmit={event => { event.preventDefault(); startAction(); adding = true; }}>
+        <label for="email">{common.email}</label><input id="email" name="email" type="email" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off" required maxlength="254" bind:value={email} />
+        <Button size="cta" type="submit" disabled={busy}>{text.add}</Button>
+      </form>{/if}</Card><Button href={"/account?site=" + slug + "&lang=" + locale} variant="outline" size="cta">{labels.account}</Button><Button wrap href={"/?site=" + slug + "&switch=1&lang=" + locale} variant="outline" size="cta">{common.switchWebsites}</Button></aside></div>
     {:else if !busy}<ErrorPage status={message === text.forbidden ? 403 : 502} tape={false} illustration="small-after" heading={message === text.forbidden ? extra[3] : extra[4]} body={message} suggestions={[{ href: "/" + slug + "/", label: text.back }, { href: "/account?site=" + slug + "&lang=" + locale, label: labels.account }]} />{/if}
     {#if allowed || busy}<div class="message state-panel" role="status">{#if message || shareLink}<p>{message}{#if shareLink} <a href={editorLink}>{editorLink}</a>{/if}</p>{/if}{#if loadFailure}<p>{loadFailure}</p>{/if}</div>{/if}
   </main>
