@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from 'svelte';
   import { SiteFooter, SiteHeader } from '@yesid/ui/layout';
-  import { ConstructionProps, ProductBrand, Wordmark, createNavigationLifecycle } from '@yesid/ui/brand';
+  import { ConstructionProps, ProductBrand, createNavigationLifecycle } from '@yesid/ui/brand';
   import { theme } from '@yesid/ui/state';
   import { legalLabels } from './legal/labels.ts';
   import { copy, locales, type Locale } from './copy.ts';
@@ -41,7 +41,9 @@
   {#if location.pathname === '/'}<div class="construction-ground" data-register="expressive" aria-hidden="true"><ConstructionProps layout="spread" floodlight /></div>{/if}
   <SiteFooter tagline={text.footerTagline} {groups}>
     {#snippet brand()}
-      <span class="brand-cluster"><Wordmark href="https://yesid.dev" external animate={false} class="text-lg" /><span class="brand-divider" aria-hidden="true"></span><a class="brand-product" href={home}>login</a></span>
+      <ProductBrand product="login" href={home} houseHref="https://yesid.dev" houseExternal houseLabel={text.brand}
+        houseStyle="font-size: 1.125rem" productStyle="font-size: 1.5rem" dividerStyle="height: 18px"
+        style="gap: 0.5rem; max-inline-size: 100%" />
     {/snippet}
     {#snippet statusStart()}<span>login.yesid.dev</span>{/snippet}
   </SiteFooter>
