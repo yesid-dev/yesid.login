@@ -1,5 +1,6 @@
 /** Source of truth shared by assignment tests and the typed browser registry. */
 export const SCENARIO_NAMES = [
+  'brandLayouts',
   'log11Acceptance',
   'log10Preferences',
   'sitesHandoff',
@@ -32,7 +33,7 @@ export type ScenarioName = typeof SCENARIO_NAMES[number];
 
 /** Keep stateful journeys together and in their original order. Rebalance from printed timings. */
 export const SHARDS: readonly (readonly ScenarioName[])[] = [
-  ['sitesHandoff', 'editorLoading'],
+  ['brandLayouts', 'sitesHandoff', 'editorLoading'],
   ['log10Preferences', 'forgivingCodeEntry', 'pendingStorageRecovery', 'accountCorrectness', 'accountStorageBlocked', 'accountNavigation'],
   ['log11Acceptance', 'startupRecovery', 'startupEffectAndIsolation', 'legalInitialFragment', 'legalWithoutJavaScript',
     'legalLanguageHash', 'analyticsCounting', 'themeAtSendTime', 'legalNavigation', 'signsInWithARealCode', 'peopleCorrectness', 'refusesAWrongCode',

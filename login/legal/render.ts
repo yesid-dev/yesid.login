@@ -27,10 +27,14 @@ function sectionHtml(section: LegalSection, level = 2): string {
     + (section.subsections ?? []).map(sub => sectionHtml(sub, level + 1)).join('');
 }
 
-function contents(sections: readonly LegalSection[]): string {
+export function contents(sections: readonly LegalSection[]): string {
   return `<ul>${sections.map(section => `<li><a href="#${escapeLegal(section.id)}">${escapeLegal(section.heading)}</a>`
     + (section.subsections ? contents(section.subsections) : '') + '</li>').join('')}</ul>`;
 }
+
+/** The approved escaped content shared by the ReadingFrame caller and no-JS fallback. */
+export const legalIntro = (text: LegalPage) => linked(text.intro);
+export const legalBody = (text: LegalPage) => text.sections.map(section => sectionHtml(section)).join('');
 
 /** Shared by the Worker fallback and Svelte; only escaped approved copy enters the HTML. */
 export function renderLegal(text: LegalPage, locale: Locale): string {
@@ -42,6 +46,6 @@ export function renderLegal(text: LegalPage, locale: Locale): string {
 <p>${escapeLegal(text.updatedLabel)} <time datetime="${LEGAL_UPDATED}">${legalDate(locale)}</time></p>
 <p>${linked(text.intro)}</p>
 <nav class="legal-toc" aria-label="${escapeLegal(labels.contents)}"><p>${escapeLegal(labels.contents)}</p>${contents(text.sections)}</nav>
-${text.sections.map(section => sectionHtml(section)).join('')}
+${legalBody(text)}
 </article></main>`;
 }

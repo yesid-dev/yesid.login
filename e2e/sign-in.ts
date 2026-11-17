@@ -1,3 +1,4 @@
+import { brandLayouts } from './brand-layouts.ts';
 import { log11Acceptance, log11Chrome, log11Error, log11Links } from './log11.ts';
 import { log10Motion, watchLog10Motion } from './log10-motion.ts';
 import { log10Chrome, log10Focus, log10Preferences } from './log10.ts';
@@ -496,7 +497,7 @@ async function legalWithoutJavaScript(browser: Awaited<ReturnType<typeof chromiu
         const text = pages[lang];
         check(`LOG-8: ${kind} ${lang} has its language without JS`, await page.locator('html').getAttribute('lang') === lang);
         check(`LOG-8: ${kind} ${lang} has full text without JS`, (await page.locator('h1').innerText()) === text.title
-          && (await page.locator('.article-body').innerText()).includes(text.sections.at(-1)!.paragraphs![0]));
+          && (await page.getByTestId('legal-body').innerText()).includes(text.sections.at(-1)!.paragraphs![0]));
         check(`LOG-8: ${kind} ${lang} date and back link`, await page.locator('time').getAttribute('datetime') === LEGAL_UPDATED
           && await page.locator(`a[href="/?lang=${lang}"]`).count() === 1);
         await page.screenshot({ path: resolve(SHOTS, `legal-nojs-${kind}-${lang}.png`), fullPage: true });
@@ -852,7 +853,7 @@ async function legalNavigation(page: Page) {
     check('the sign-in form carries no consent line', await page.locator('.legal-consent').count() === 0);
     for (const path of ['privacy', 'terms']) {
       await page.locator(`[data-testid="footer"] a[href="/legal/${path}?lang=${lang}"]`).click();
-      await page.locator('.article-body').waitFor();
+      await page.getByTestId('legal-body').waitFor();
       check('signed-out legal page '+path+' '+lang, new URL(page.url()).pathname === '/legal/'+path && await page.locator('html').getAttribute('lang') === lang);
       check('legal pages allow indexing', await page.locator('meta[name="robots"]').count() === 0);
       await page.goto(`${ORIGIN}/?lang=${lang}`); await page.locator('#email').waitFor();
@@ -1046,6 +1047,7 @@ try {
   // The design system's view transitions report this harmlessly when a page navigates during one.
   page.on('pageerror', (error) => { if (error.message !== 'Transition was skipped') problems.push(error.message); });
   const scenarios = {
+    brandLayouts: () => brandLayouts(launched, ORIGIN, SHOTS, check),
     log11Acceptance: () => log11Acceptance(launched, ORIGIN, check),
     log10Preferences: () => log10Preferences(launched, ORIGIN, check),
     sitesHandoff: () => sitesHandoff(launched, ORIGIN, check),
