@@ -942,7 +942,7 @@ async function visualMatrix(page: Page) {
     await view.locator('#email').fill('visual@example.test'); await view.locator('form button[type="submit"]').click(); await codeField(view).waitFor(); await capture(view,prefix+'-account2');
     await setPendingCode('changed@example.test',CODE,'email-verification');
     await view.locator('#code').fill(CODE); await view.locator('form button[type="submit"]').click();
-    await view.waitForFunction(() => [...document.querySelectorAll('.label-station')].some(node => node.textContent?.includes('3 / 3')));
+    await view.getByText(/^3 \/ 3/).waitFor();
     await capture(view,prefix+'-account3');
     await editorStates(view, prefix, lang);
     await context.close();
