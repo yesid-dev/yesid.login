@@ -12,16 +12,24 @@ async function fits(page: Page, name: string, check: Check) {
 
 async function brand(page: Page, name: string, check: Check) {
   const clusters = page.locator('[data-slot="product-brand"]');
-  check(`layouts public brand in header ${name}`, await clusters.count() === 1);
+  check(`layouts public brand in header and footer ${name}`, await clusters.count() === 2);
   const footer = page.getByTestId('footer');
-  const house = footer.getByRole('link', { name: /^yesid\s*\.$/ });
+  const house = footer.getByRole('link', { name: /^yesid/ });
   const product = footer.getByRole('link', { name: 'login', exact: true });
   const sizes = [await house.evaluate(el => parseFloat(getComputedStyle(el).fontSize)), await product.evaluate(el => parseFloat(getComputedStyle(el).fontSize))];
   check(`layouts retained footer sizes ${name}`, sizes[0] === 18 && sizes[1] === 24, JSON.stringify(sizes));
+  const geometry = await footer.locator('[data-slot="product-brand"]').evaluate(el => {
+    const divider = el.querySelector(':scope > [aria-hidden="true"]')!.getBoundingClientRect();
+    return { divider: divider.height, gap: parseFloat(getComputedStyle(el).columnGap) };
+  });
+  check(`layouts footer divider and gap ${name}`, geometry.divider === 18 && geometry.gap === 8, JSON.stringify(geometry));
+  check(`layouts footer lowercase name ${name}`, await product.innerText() === 'login');
+
   for (const cluster of await clusters.all()) {
     const links = cluster.getByRole('link');
     check(`layouts brand destinations ${name}`, await links.first().getAttribute('href') === 'https://yesid.dev'
-      && await links.last().getAttribute('href') === '/?lang=' + await page.locator('html').getAttribute('lang'));
+      && await links.last().getAttribute('href') === '/?lang=' + await page.locator('html').getAttribute('lang')
+      && await links.first().getAttribute('target') === '_blank' && (await links.first().getAttribute('rel'))?.includes('noopener') === true);
     check(`layouts brand targets ${name}`, await links.evaluateAll(nodes => nodes.every(node => { const r = node.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; })));
     await links.last().focus(); await page.keyboard.press('Tab'); await page.keyboard.press('Shift+Tab');
     check(`layouts brand keyboard outline ${name}`, await links.last().evaluate(node => {
@@ -30,9 +38,11 @@ async function brand(page: Page, name: string, check: Check) {
   }
   if (name.endsWith('/768')) {
     await page.emulateMedia({ forcedColors: 'active' });
-    const link = clusters.getByRole('link').last();
-    await link.focus(); await page.keyboard.press('Tab'); await page.keyboard.press('Shift+Tab');
-    check(`layouts forced-colors focus ${name}`, await link.evaluate(el => getComputedStyle(el).outlineStyle !== 'none' && parseFloat(getComputedStyle(el).outlineWidth) >= 2));
+    for (const cluster of await clusters.all()) {
+      const link = cluster.getByRole('link').last();
+      await link.focus(); await page.keyboard.press('Tab'); await page.keyboard.press('Shift+Tab');
+      check(`layouts forced-colors focus ${name}`, await link.evaluate(el => getComputedStyle(el).outlineStyle !== 'none' && parseFloat(getComputedStyle(el).outlineWidth) >= 2));
+    }
     await page.emulateMedia({ forcedColors: 'none' });
     check(`layouts reduced motion still ${name}`, await page.evaluate(() => document.getAnimations().every(a => a.playState !== 'running' || a.effect?.getComputedTiming().iterations !== Infinity)));
   }
@@ -52,12 +62,16 @@ async function task({ page, origin, shots, lang, theme, width, name, check }: Fi
   await brand(page, name, check); await fits(page, name, check);
   if (width === 320) {
     // A longer local-fixture label exercises the real public component's wrapping, not product copy.
-    const product = page.locator('[data-slot="product-brand-name"]');
-    const label = await product.innerText();
-    await product.evaluate(el => { el.textContent = 'Local fixture longer product name'; });
-    check(`layouts public brand wraps ${name}`, await product.evaluate(el => el.getBoundingClientRect().height > parseFloat(getComputedStyle(el).lineHeight) * 1.5));
-    await fits(page, name + ' longer brand', check);
-    await product.evaluate((el, text) => { el.textContent = text; }, label);
+    for (const product of await page.locator('[data-slot="product-brand-name"]').all()) {
+      const label = await product.innerText();
+      await product.evaluate(el => { el.textContent = 'Local fixture longer product name'; });
+      check(`layouts public brand wraps ${name}`, await product.evaluate(el => {
+        const range = document.createRange(); range.selectNodeContents(el);
+        return new Set([...range.getClientRects()].filter(r => r.width > 0 && r.height > 0).map(r => Math.round(r.top))).size > 1;
+      }));
+      await fits(page, name + ' longer brand', check);
+      await product.evaluate((el, text) => { el.textContent = text; }, label);
+    }
     await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
     await fits(page, name + ' enlarged text', check);
     await page.evaluate(() => { document.documentElement.style.fontSize = ''; });
