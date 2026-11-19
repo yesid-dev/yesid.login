@@ -39,7 +39,7 @@
   </SiteHeader>
   <div class="shell" class:shell-center={center}>{@render children()}</div>
   {#if location.pathname === '/'}<div class="construction-ground" data-register="expressive" aria-hidden="true"><ConstructionProps layout="spread" floodlight /></div>{/if}
-  <SiteFooter tagline={text.footerTagline} {groups}>
+  <SiteFooter edge="hazard" tagline={text.footerTagline} {groups}>
     {#snippet brand()}
       <ProductBrand product="login" href={home} houseHref="https://yesid.dev" houseExternal houseLabel={text.brand}
         houseStyle="font-size: 1.125rem" productStyle="font-size: 1.5rem" dividerStyle="height: 18px"
