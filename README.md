@@ -106,6 +106,9 @@ Cloudflare assets use their normal content-based deployment handling.
 The build refuses Node versions other than 24 LTS. Bun runs installation and tests.
 The browser suite uses four local ports starting at localhost:8799; set `LOGIN_E2E_PORT`
 to the first of four free consecutive ports when another development session is using them.
+The four shards run in parallel and start `LOGIN_E2E_STAGGER_MS` apart (default 6000), so their first
+process inventories do not overlap; `--sequential` runs them one after another. On Windows, a process inventory
+reads one native process snapshot (parent, name and creation time), and each inventory call has a five-second limit.
 
 Teardown closes browser contexts before the browser and Worker, then audits their owned
 process trees and removes each private OS temp root (for example,
@@ -120,14 +123,14 @@ A five-second cleanup phase can escalate to native termination; warnings include
 resource and phase durations. Success requires verified exit and temp removal; missing
 identity metadata, close/kill errors and surviving processes remain failures.
 
-The exact v0.50.0 UI release uses its explicit peers `@yesid/tokens`, `@yesid/motion`,
-`@yesid/seo-kit`, Svelte 5.57.2 and Satori 0.33.5. CSS order is tokens, Tailwind,
+The pinned UI release uses its explicit peers `@yesid/tokens`, `@yesid/motion` and
+`@yesid/seo-kit` from the same release, with Svelte 5.57.2 and Satori 0.33.5. CSS order is tokens, Tailwind,
 UI base; the copied self-hosted font stylesheet loads separately. No SvelteKit router is needed.
 
-The app uses SiteHeader (still `yesid. | Login` brand), SiteFooter, Wordmark, Button and ConstructionProps.
+The app uses SiteHeader and SiteFooter with the shared ProductBrand, Masthead, ErrorPage, ReadingFrame, Card, Button, Badge, StatusDot and ConstructionProps.
 ConstructionProps appear only on `/` itself.
 The fixed background uses the shared `circuit-grid` class, as the website does.
-There is no generic email/code input in this release, so native labelled inputs use semantic tokens.
+The kit has no email or code input, so native labelled inputs use semantic tokens.
 The layout, localized copy and security-sensitive controller remain app-owned.
 The theme boot is an external blocking script before CSS. It reads the design system's `theme`
 key and otherwise follows the system; `@yesid/ui/state` adopts it and owns toggling.
@@ -165,15 +168,20 @@ bottom toolbar, hidden while an entry is open. Verify its placement when changin
 
 ## Login chrome and account email
 
-The login, popup, People and `/account` share `login/Chrome.svelte`. The real SiteHeader receives empty links and menu items. Its navigation lifecycle has inert router registration callbacks because every navigation unloads the document. The package omits its empty menu control; the brand snippet supplies the still house wordmark, divider and product link. ConstructionProps is decorative and appears only on `/`, spread with a floodlight, in a 240px ground or 100px at 1023px and below.
+The login, popup, People and `/account` share `login/Chrome.svelte`. The real SiteHeader receives empty links and menu items. Its navigation lifecycle has inert router registration callbacks because every navigation unloads the document. The package omits its empty menu control; the header's ProductBrand supplies the still house wordmark, divider and product link. ConstructionProps is decorative and appears only on `/`, spread with a floodlight, in a 240px ground or 100px at 1023px and below.
 
-The footer is the shared SiteFooter, as on yesid.dev and Transit, and the header carries the `yesid. | Login` brand. The footer keeps the localized tagline without an availability claim or date. The sign-in form is centered in the first screen, above the ground, on the sign-in page only.
+The footer is the shared SiteFooter with the kit hazard strip along its top edge (`edge="hazard"`), as on yesid.dev. Its ProductBrand is an 18px house mark, an 18px divider and a 24px lowercase `login` with an 8px gap, and it keeps the localized tagline without an availability claim or date. The header carries the `yesid. | Login` brand. Buttons inside form cards wrap their label when a reader's text spacing makes it too wide, so a form never grows past its card. The sign-in form is centered in the first screen, above the ground, on the sign-in page only.
 
 Sign-in step two stores only its step, email and five-minute deadline in sessionStorage. Language links reload the full document and preserve the site hint. Codes and tokens never enter that entry. It is removed on success, return to step one or expiry. Unavailable storage is reported before switching languages.
 
 `/account?site=<slug>` is linked from the editor as My account for every signed-in role, and from People.
 A signed-in person first requests a code to their current address,
 then submits it with the new address to request a destination code, then confirms that code.
+Each code step offers Request another code and Start again. On the current-address step, Request another code
+sends a fresh code to the current address; on the destination step, both return to the address step with a note,
+because the destination code needs a fresh current-address proof. At a code's five-minute deadline the step keeps
+the digits and disables the check. A lost reply to the final change offers sign-in with either address.
+The rules are A-1 to A-9 in `docs/state-transitions.md`.
 The current-address request reuses `/email-otp/send-verification-otp` with `type: email-verification`;
 the Worker ignores any caller-supplied address and uses the session address. Only the exact two native
 email-change paths are additionally allowed. Better Auth requires current-address proof.
@@ -193,6 +201,8 @@ an ID-only audit entry. Pending and confirmed additions remain no-ops. Expired p
 Last edit is the latest retained `edit_log` entry for each person on this site, not a permanent
 history. Retention can remove this evidence; the UI says so rather than inventing a date.
 
+Sign-in codes are sent as "Your sign-in code". Account codes, to the current and the destination address, are sent as
+"Your code to change your email" and point to the Change my email page.
 Code email colours use the allowlisted `X-Login-Theme` header (`light`, `dark`, default dark).
 Welcome, first-sign-in Owner notices and old-address notices default to inline light colours and offer
 a dark media override. Tests render these emails in local Chromium only; they do not cover Gmail or Outlook. Owner notices use French because no stored Owner language exists.
@@ -205,7 +215,8 @@ Pull requests reach `main` through its merge queue: enqueue one with `gh pr merg
 queue reruns the required `verify` check on the combined change before squash-merging it.
 
 Standard releases follow `AGENTS.md`: merged PR first, additive migrations before the Worker that needs them,
-then `bun run release:staging` (`bun run deploy:staging`), a real sign-in and save on staging, then `bun run release` (`bun run deploy`).
+then `bun run release:staging` (`bun run deploy:staging`); on staging, a real sign-in, a sandbox Save and its restore, and the
+email change on My account up to the destination code without completing it; then `bun run release` (`bun run deploy`).
 
 Staging is a separate copy, `[env.staging]` in `wrangler.toml`: its own Worker, D1 database, session secret
 and GitHub App, installed only on a sandbox repository whose `staging` branch points its `cms/config.yml` at
