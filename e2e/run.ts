@@ -24,6 +24,10 @@ for (let i = 0; i < args.length; i++) {
 if (!selected && process.env.LOGIN_E2E_SHARD) selected = parseShard(process.env.LOGIN_E2E_SHARD, SHARDS.length);
 const basePort = Number(process.env.LOGIN_E2E_PORT || 8799);
 if (!Number.isInteger(basePort) || basePort < 1 || basePort + SHARDS.length - 1 > 65535) throw new Error('Invalid E2E base port');
+// Each shard's first process inventory starts PowerShell; four at once can pass the inventory limit on a busy host.
+// Starting shards a few seconds apart keeps those inventories apart without changing the limit.
+const staggerMs = Number(process.env.LOGIN_E2E_STAGGER_MS ?? 6000);
+if (!Number.isInteger(staggerMs) || staggerMs < 0) throw new Error('Invalid E2E stagger');
 const active = new Set<ReturnType<typeof superviseShard>>();
 let interruptionExitCode = 0;
 const forward = (signal: 'SIGINT' | 'SIGTERM') => {
@@ -80,7 +84,8 @@ try {
   const results: number[] = [];
   if (sequential) { for (const shard of shards) results.push(await runShard(shard)); }
   else {
-    const settled = await Promise.allSettled(shards.map(runShard));
+    const settled = await Promise.allSettled(shards.map((shard, index) =>
+      new Promise(resolve => setTimeout(resolve, index * staggerMs)).then(() => runShard(shard))));
     for (const result of settled) {
       if (result.status === 'fulfilled') results.push(result.value);
       else { console.error(result.reason); results.push(1); }
