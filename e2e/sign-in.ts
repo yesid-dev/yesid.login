@@ -804,7 +804,11 @@ async function accountRecovery(browser: import('playwright-core').Browser) {
   for (const lang of ['en', 'fr', 'es'] as const) {
     const common = copy[lang], text = accountCopy[lang];
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-    await context.addInitScript(() => localStorage.setItem('login.session.example', JSON.stringify({ token: 'account-test' })));
+    // Seed the session once per tab, so A-5 can show that it is removed.
+    await context.addInitScript(() => {
+      if (sessionStorage.getItem('seeded')) return;
+      localStorage.setItem('login.session.example', JSON.stringify({ token: 'account-test' })); sessionStorage.setItem('seeded', '1');
+    });
     const page = await context.newPage();
     await page.clock.install();
     const requests: string[] = [];
@@ -831,12 +835,15 @@ async function accountRecovery(browser: import('playwright-core').Browser) {
     await toCurrent();
     // A2: Request another code repeats A1's request and stays on A2.
     await codeField(page).fill('123456');
+    const first = JSON.parse(await record()), sentBefore = requests.length;
+    await page.clock.fastForward(1000);
     let release!: () => void; hold = new Promise(resolve => { release = resolve; });
     await resend.click(); await page.getByRole('button', { name: common.requesting, exact: true }).waitFor();
-    check(`A-6 A2 resend is busy and named ${lang}`, await submit.isDisabled() && requests.at(-1) === 'send-verification-otp');
+    check(`A-6 A2 resend is busy and named ${lang}`, await submit.isDisabled());
     release(); hold = undefined; await statusText(text.sentCurrent);
     const resent = JSON.parse(await record());
-    check(`A-6 A2 resend stays on A2, clears digits and focuses the field ${lang}`, await codeField(page).inputValue() === '' && await focused(codeField(page)) && resent.stage === 'current' && resent.newEmail === 'new@example.test');
+    check(`A-6 A2 resend repeats A1's request ${lang}`, requests.length === sentBefore + 1 && requests.at(-1) === 'send-verification-otp');
+    check(`A-6 A2 resend stays on A2 with a new deadline, clears digits and focuses the field ${lang}`, await codeField(page).inputValue() === '' && await focused(codeField(page)) && resent.stage === 'current' && resent.newEmail === 'new@example.test' && resent.sentAt >= first.sentAt + 1000);
     for (const [code, failure] of [[500, text.sendFailed], [429, common.rate]] as const) {
       status = code; await codeField(page).fill('654321'); const before = await record();
       await resend.click(); await statusText(failure);
@@ -853,7 +860,9 @@ async function accountRecovery(browser: import('playwright-core').Browser) {
     }
     // A-7: at the deadline the stage, digits and recovery stay; only the check is disabled.
     await toCurrent(); await codeField(page).fill('123456'); await submit.focus();
-    await page.clock.fastForward(300250);
+    await page.clock.fastForward(299000);
+    check(`A-7 A2 nothing expires before the deadline ${lang}`, await submit.isEnabled() && await page.locator('#code-error').count() === 0);
+    await page.clock.fastForward(1250);
     await page.locator('#code-error').filter({ hasText: common.expired }).waitFor();
     check(`A-7 A2 deadline keeps digits, disables the check and moves focus ${lang}`, await codeField(page).inputValue() === '123456' && await submit.isDisabled() && await focused(resend) && await codeField(page).getAttribute('aria-describedby') === 'code-error' && await page.getByRole('alert').count() === 1);
     await resend.click(); await statusText(text.sentCurrent);
@@ -868,8 +877,10 @@ async function accountRecovery(browser: import('playwright-core').Browser) {
     await toNew(); lost = true; await codeField(page).fill('123456'); await submit.click(); await statusText(text.lost);
     const signInNew = page.getByRole('button', { name: text.signInNew, exact: true });
     check(`A-5 lost change offers both sign-ins ${lang}`, await focused(signInNew) && await page.getByRole('button', { name: text.signInCurrent, exact: true }).count() === 1 && await page.locator('form').count() === 0);
+    await page.clock.fastForward(300250);
+    check(`A-5 the deadline keeps the lost-reply message ${lang}`, (await page.locator('.message').innerText()) === text.lost && await page.locator('#code-error').count() === 0);
     lost = false; await signInNew.click(); await page.waitForURL(`${ORIGIN}/?site=example`);
-    check(`A-5 sign-in clears the Account record ${lang}`, await record() === '');
+    check(`A-5 sign-in clears the Account record and the old session ${lang}`, await record() === '' && await page.evaluate(() => localStorage.getItem('login.session.example')) === null);
     await context.close();
   }
 }

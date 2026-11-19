@@ -23,6 +23,8 @@
   const headers = () => ({ Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', 'X-Login-Language': locale, 'X-Login-Theme': document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light' });
   function clearRecord() { try { clearAccount(sessionStorage, slug); } catch { /* Storage itself may be blocked. */ } }
   function signIn() { clearRecord(); location.replace(validTarget(slug) ? '/?site=' + encodeURIComponent(slug) : '/'); }
+  /** A-5: whichever address now holds, sign in afresh rather than reopen the editor with the old token. */
+  function signInAgain() { try { localStorage.removeItem(siteKey(slug)); } catch { /* The server still decides. */ } signIn(); }
   function retain(stage: AccountStage, sentAt = Date.now()) {
     try { if (!saveAccount(sessionStorage, slug, userId, stage, email, sentAt)) storageWarning = true; }
     catch { storageWarning = true; }
@@ -40,13 +42,15 @@
   /** A-7: the stage stays, the digits stay, the check is disabled and Request another code leads on. */
   function expire() {
     const moveFocus = document.activeElement?.id === 'account-submit';
-    expired = true; message = '';
+    expired = true;
+    // "It expires in 5 minutes" is no longer true; a failure or a wait stays.
+    if (message === text.sentCurrent || message === text.sent) message = '';
     if (moveFocus) void tick().then(() => resendButton?.focus({ preventScroll: true }));
   }
   onMount(() => {
     void restore();
     const timer = setInterval(() => {
-      if ((step === 'current' || step === 'enter') && !expired && expiresAt && Date.now() >= expiresAt) expire();
+      if ((step === 'current' || step === 'enter') && !expired && !lostChange && expiresAt && Date.now() >= expiresAt) expire();
     }, 250);
     return () => clearInterval(timer);
   });
@@ -187,7 +191,7 @@
     {#if storageWarning}<p role="status">{text.storage}</p>{/if}
     <p role="status" class="message state-panel">{message}</p>
     {#if lostChange}
-      <div class="step-actions"><button type="button" bind:this={lostAction} onclick={signIn}>{text.signInNew}</button><button type="button" onclick={signIn}>{text.signInCurrent}</button></div>
+      <div class="step-actions"><button type="button" bind:this={lostAction} onclick={signInAgain}>{text.signInNew}</button><button type="button" onclick={signInAgain}>{text.signInCurrent}</button></div>
     {/if}
   </main>
 </Chrome>
