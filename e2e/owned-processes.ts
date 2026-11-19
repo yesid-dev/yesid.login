@@ -31,6 +31,52 @@ function Stop-RecordedProcess($request) {
     throw
   } finally { if($candidate) { $candidate.Dispose() } }
 }
+# One kernel process snapshot (NtQuerySystemInformation): pid, parent, name and creation time for every process in a
+# single call, about 0.1 s, where WMI takes seconds on a busy host. Creation times use the same 1-microsecond rounding
+# as the targeted read below. The offsets are the 64-bit layout; any other architecture fails closed.
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public sealed class LoginProcessRow { public long pid { get; set; } public long parent { get; set; } public string name { get; set; } public string created { get; set; } }
+public static class LoginProcessSnapshot {
+  [DllImport("ntdll.dll")] static extern int NtQuerySystemInformation(int infoClass, IntPtr buffer, int length, out int returned);
+  public static List<LoginProcessRow> Take() {
+    if (IntPtr.Size != 8) throw new PlatformNotSupportedException("The process snapshot reads the 64-bit layout only");
+    int length = 1 << 20;
+    IntPtr buffer = IntPtr.Zero;
+    try {
+      while (true) {
+        buffer = Marshal.AllocHGlobal(length);
+        int returned;
+        int status = NtQuerySystemInformation(5, buffer, length, out returned);
+        if (status == 0) break;
+        Marshal.FreeHGlobal(buffer); buffer = IntPtr.Zero;
+        if (status != unchecked((int)0xC0000004)) throw new InvalidOperationException("Process snapshot failed: 0x" + status.ToString("X8"));
+        length = Math.Max(length * 2, returned + 65536);
+      }
+      var rows = new List<LoginProcessRow>();
+      long offset = 0;
+      while (true) {
+        IntPtr entry = new IntPtr(buffer.ToInt64() + offset);
+        int next = Marshal.ReadInt32(entry, 0x00);
+        long created = Marshal.ReadInt64(entry, 0x20);
+        int nameBytes = Marshal.ReadInt16(entry, 0x38) & 0xFFFF;
+        IntPtr namePointer = Marshal.ReadIntPtr(entry, 0x40);
+        rows.Add(new LoginProcessRow {
+          pid = Marshal.ReadIntPtr(entry, 0x50).ToInt64(),
+          parent = Marshal.ReadIntPtr(entry, 0x58).ToInt64(),
+          name = namePointer == IntPtr.Zero ? "" : Marshal.PtrToStringUni(namePointer, nameBytes / 2),
+          created = created > 0 ? (created - (created % 10)).ToString() : ""
+        });
+        if (next == 0) break;
+        offset += next;
+      }
+      return rows;
+    } finally { if (buffer != IntPtr.Zero) Marshal.FreeHGlobal(buffer); }
+  }
+}
+'@
 [Console]::WriteLine('ready')
 while($null -ne ($line = [Console]::ReadLine())) {
   $request = $line | ConvertFrom-Json
@@ -55,10 +101,10 @@ while($null -ne ($line = [Console]::ReadLine())) {
       } finally { if($candidate) { $candidate.Dispose() } }
     } else {
       $snapshotStarted = [DateTime]::UtcNow.ToFileTimeUtc()
-      $rows = @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,Name,CreationDate | Where-Object {
-        !$_.CreationDate -or $_.CreationDate.ToFileTimeUtc() -le $snapshotStarted
-      } | ForEach-Object {
-        [pscustomobject]@{pid=$_.ProcessId;parent=$_.ParentProcessId;name=$_.Name;created=$(if($_.CreationDate){$_.CreationDate.ToFileTimeUtc().ToString()}else{''})}
+      $rows = @(foreach($row in [LoginProcessSnapshot]::Take()) {
+        if(!$row.created -or [long]$row.created -le $snapshotStarted) {
+          [pscustomobject]@{pid=$row.pid;parent=$row.parent;name=$row.name;created=$row.created}
+        }
       })
     }
     [pscustomobject]@{id=$request.id;rows=$rows} | ConvertTo-Json -Depth 4 -Compress
