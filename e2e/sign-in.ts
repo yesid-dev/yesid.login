@@ -6,6 +6,7 @@ import { SCENARIO_NAMES, SHARDS, assertShardAssignment, parseShard, type Scenari
 import { sitesHandoff, editorLoading } from './sites-handoff.ts';
 import { accountNavigation } from './account-navigation.ts';
 import { privacy, terms, LEGAL_UPDATED } from '../login/legal/copy.ts';
+import { copy, accountCopy } from '../login/copy.ts';
 import { legalDate } from '../login/legal/render.ts';
 import { exampleSiteSql } from '../scripts/example-fixture.ts';
 // A real sign-in in a real browser, against the real Worker and a local database: type a code, press the button, land in the editor.
@@ -797,6 +798,80 @@ async function accountStorageBlocked(browser: import('playwright-core').Browser)
   check('A-5 blocked record removal still shows completion', await page.locator('form').count() === 0);
   await context.close();
 }
+// LOG-15: A-6 stage actions, A-7 deadline and A-5 lost change, with synthetic replies; no email leaves the browser.
+async function accountRecovery(browser: import('playwright-core').Browser) {
+  for (const lang of ['en', 'fr', 'es'] as const) {
+    const common = copy[lang], text = accountCopy[lang];
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    await context.addInitScript(() => localStorage.setItem('login.session.example', JSON.stringify({ token: 'account-test' })));
+    const page = await context.newPage();
+    await page.clock.install();
+    const requests: string[] = [];
+    let status = 200, lost = false, hold: Promise<void> | undefined;
+    await page.route('**/auth/api/get-session', route => route.fulfill({ json: { session: {}, user: { id: 'account-user', email: 'current@example.test' } } }));
+    await page.route('**/account', route => route.request().headers().authorization ? route.fulfill({ json: {} }) : route.continue());
+    await page.route('**/auth/sites', route => route.fulfill({ json: [{ slug: 'example' }] }));
+    await page.route('**/auth/api/email-otp/*', async route => {
+      requests.push(route.request().url().split('/').pop()!);
+      await hold;
+      if (lost) return route.abort();
+      return route.fulfill({ status, json: { success: true } });
+    });
+    const submit = page.locator('#account-submit'), email = page.locator('#email');
+    const resend = page.getByRole('button', { name: common.resend, exact: true });
+    const again = page.getByRole('button', { name: text.startAgain, exact: true });
+    const statusText = (value: string) => page.getByRole('status').filter({ hasText: value }).waitFor();
+    const record = () => page.evaluate(() => sessionStorage.getItem('login.account.example') || '');
+    const focused = (target: import('playwright-core').Locator) => target.evaluate(el => el === document.activeElement);
+    const toCurrent = async () => { await email.fill('new@example.test'); await submit.click(); await codeField(page).waitFor(); };
+    const toNew = async () => { await toCurrent(); await codeField(page).fill('123456'); await submit.click(); await statusText(text.sent); };
+    await page.goto(`${ORIGIN}/account?site=example&lang=${lang}`); await page.locator('#email:enabled').waitFor();
+    check(`A-6 no stage actions before a code is sent ${lang}`, await resend.count() === 0 && await again.count() === 0);
+    await toCurrent();
+    // A2: Request another code repeats A1's request and stays on A2.
+    await codeField(page).fill('123456');
+    let release!: () => void; hold = new Promise(resolve => { release = resolve; });
+    await resend.click(); await page.getByRole('button', { name: common.requesting, exact: true }).waitFor();
+    check(`A-6 A2 resend is busy and named ${lang}`, await submit.isDisabled() && requests.at(-1) === 'send-verification-otp');
+    release(); hold = undefined; await statusText(text.sentCurrent);
+    const resent = JSON.parse(await record());
+    check(`A-6 A2 resend stays on A2, clears digits and focuses the field ${lang}`, await codeField(page).inputValue() === '' && await focused(codeField(page)) && resent.stage === 'current' && resent.newEmail === 'new@example.test');
+    for (const [code, failure] of [[500, text.sendFailed], [429, common.rate]] as const) {
+      status = code; await codeField(page).fill('654321'); const before = await record();
+      await resend.click(); await statusText(failure);
+      check(`A-6 A2 failed resend (${code}) keeps digits and record ${lang}`, await codeField(page).inputValue() === '654321' && await record() === before && await focused(resend));
+    }
+    status = 200;
+    const sent = requests.length; await again.click(); await page.locator('#email:enabled').waitFor();
+    check(`A-6 A2 Start again returns to A1 with the address ${lang}`, await email.inputValue() === 'new@example.test' && await focused(email) && JSON.parse(await record()).stage === 'address' && requests.length === sent);
+    // A3: no code can be sent alone, so every way back leads to A1 with a note.
+    for (const [name, action] of [['Request another code', resend], ['Start again', again]] as const) {
+      await toNew(); const before = requests.length;
+      await action.click(); await page.locator('#email:enabled').waitFor();
+      check(`A-6 A3 ${name} returns to A1 with a note ${lang}`, await email.inputValue() === 'new@example.test' && await focused(email) && JSON.parse(await record()).stage === 'address' && requests.length === before && (await page.locator('.message').innerText()) === text.again);
+    }
+    // A-7: at the deadline the stage, digits and recovery stay; only the check is disabled.
+    await toCurrent(); await codeField(page).fill('123456'); await submit.focus();
+    await page.clock.fastForward(300250);
+    await page.locator('#code-error').filter({ hasText: common.expired }).waitFor();
+    check(`A-7 A2 deadline keeps digits, disables the check and moves focus ${lang}`, await codeField(page).inputValue() === '123456' && await submit.isDisabled() && await focused(resend) && await codeField(page).getAttribute('aria-describedby') === 'code-error' && await page.getByRole('alert').count() === 1);
+    await resend.click(); await statusText(text.sentCurrent);
+    check(`A-7 A2 another code leaves the expired state ${lang}`, await submit.isEnabled() && await page.locator('#code-error').count() === 0 && await codeField(page).inputValue() === '');
+    await codeField(page).fill('123456'); await submit.click(); await statusText(text.sent); await codeField(page).fill('123456');
+    await page.clock.fastForward(300250);
+    await page.locator('#code-error').filter({ hasText: common.expired }).waitFor();
+    check(`A-7 A3 deadline keeps the field focused ${lang}`, await focused(codeField(page)) && await submit.isDisabled() && await codeField(page).inputValue() === '123456');
+    await resend.click(); await page.locator('#email:enabled').waitFor();
+    check(`A-7 A3 expired recovery returns to A1 with a note ${lang}`, (await page.locator('.message').innerText()) === text.again);
+    // A-5: a lost change reply may hide a completed change.
+    await toNew(); lost = true; await codeField(page).fill('123456'); await submit.click(); await statusText(text.lost);
+    const signInNew = page.getByRole('button', { name: text.signInNew, exact: true });
+    check(`A-5 lost change offers both sign-ins ${lang}`, await focused(signInNew) && await page.getByRole('button', { name: text.signInCurrent, exact: true }).count() === 1 && await page.locator('form').count() === 0);
+    lost = false; await signInNew.click(); await page.waitForURL(`${ORIGIN}/?site=example`);
+    check(`A-5 sign-in clears the Account record ${lang}`, await record() === '');
+    await context.close();
+  }
+}
 async function accountFlow(page: Page) {
   await page.goto(`${ORIGIN}/account?lang=en`);
   await page.waitForURL(`${ORIGIN}/`);
@@ -1056,6 +1131,7 @@ try {
     pendingStorageRecovery: () => pendingStorageRecovery(launched),
     accountCorrectness: () => accountCorrectness(launched),
     accountStorageBlocked: () => accountStorageBlocked(launched),
+    accountRecovery: () => accountRecovery(launched),
     startupRecovery: () => startupRecovery(launched),
     startupEffectAndIsolation: () => startupEffectAndIsolation(launched),
     legalInitialFragment: () => legalInitialFragment(page),
