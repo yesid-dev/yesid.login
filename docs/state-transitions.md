@@ -233,5 +233,7 @@ Account lives at `/account?site=<slug>` and needs the stored token for that site
 | A failed Account restore enables the form; "Invalid or expired code" and "Could not sign in" appear out of place | A-1, A-2 | LOG-5 |
 | The Account code field cuts a formatted paste | A-4, A-5 | LOG-5 |
 | A language change loses the Account stage and the new address | A-8 | LOG-5 (keep the address); LOG-15 (full stages) |
-| Back and Request another code in Account | A-6 | LOG-15 |
+| Closed: A2 and A3 offer Request another code and Start again; from A3 every way back leads to A1 with a note | A-6 | LOG-15 |
+| Closed: at the Account deadline the stage and digits stay, the check is disabled and Request another code leads on | A-7 | LOG-15 |
+| Closed: a lost reply to the address change offers sign-in with either address | A-5 | LOG-15 |
 | Account is linked only from People | Account | LOG-16 |
