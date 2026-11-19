@@ -366,6 +366,8 @@ for (const theme of ['dark','light'] as const) for (const type of ['sign-in','em
     expect(messages).toHaveLength(1);
     expect(messages[0].html).toContain(`content="${theme}"`);
     expect(messages[0].html).toContain(theme === 'dark' ? '#141414' : '#F3F6FB');
+    // Account codes say what they are for; sign-in keeps its neutral wording.
+    expect((messages[0] as { subject?: string }).subject).toStartWith(type === 'sign-in' ? 'Your sign-in code:' : 'Your code to change your email:');
   });
 }
 

@@ -103,6 +103,19 @@ test('each language punctuates its subject its own way', () => {
   assert.equal(passcodeEmail('123456', 'es').subject, 'Tu código de inicio de sesión: 123456');
 });
 
+test('Account codes name the email change, not the sign-in page, in every language', () => {
+  const page = { fr: 'Changer mon courriel', en: 'Change my email', es: 'Cambiar mi correo' } as const;
+  const signInPage = { fr: 'page de connexion', en: 'sign-in page', es: 'inicio de sesión' } as const;
+  for (const language of ['fr', 'en', 'es'] as const) {
+    const message = passcodeEmail('123456', language, 'dark', 'account');
+    expect(message.subject.endsWith(' 123456')).toBe(true);
+    expect(message.subject).not.toBe(passcodeEmail('123456', language).subject);
+    expect(message.text).toContain(page[language]);
+    expect(message.text).not.toContain(signInPage[language]);
+    expect(message.text.split('\n').filter(line => line.includes('123456'))).toEqual(['123456']);
+  }
+});
+
 test('welcome escapes labels and contains only an editor link, no images or codes', async () => {
   for (const language of ['fr', 'en', 'es'] as const) {
     const email = welcomeEmail('<img src=x onerror="bad()">', 'a', language);

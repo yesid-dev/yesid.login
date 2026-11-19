@@ -1,7 +1,7 @@
 import { alertFailure } from './alerts.ts';
 import { betterAuth, type BetterAuthOptions } from 'better-auth';
 import { bearer, emailOTP } from 'better-auth/plugins';
-import { emailLanguage, emailTheme, passcodeEmail, type EmailTheme, type EmailLanguage } from './email.ts';
+import { emailLanguage, emailTheme, passcodeEmail, type CodePurpose, type EmailTheme, type EmailLanguage } from './email.ts';
 import type { Env } from './env.ts';
 import { hasSite } from './sites.ts';
 
@@ -87,12 +87,12 @@ export async function deliverCode(env: Env, email: string, code: string, languag
 }
 
 /** Sends the code through Resend. Failures reach the Worker's log, never the person signing in. */
-export async function sendCodeByEmail(apiKey: string, from: string, email: string, code: string, language: EmailLanguage = 'fr', theme: EmailTheme = 'dark', alertEnv?: Env): Promise<void> {
+export async function sendCodeByEmail(apiKey: string, from: string, email: string, code: string, language: EmailLanguage = 'fr', theme: EmailTheme = 'dark', alertEnv?: Env, purpose: CodePurpose = 'sign-in'): Promise<void> {
   try {
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from, to: email, ...passcodeEmail(code, language, theme) }),
+    body: JSON.stringify({ from, to: email, ...passcodeEmail(code, language, theme, purpose) }),
     signal: AbortSignal.timeout(10000)
   });
   if (!response.ok) { console.error('Resend refused the email', response.status); if (alertEnv) await alertFailure(alertEnv, 'code-email', response.status); }
@@ -103,6 +103,6 @@ export function codeDelivery(request: Request, env: Env, ctx: ExecutionContext):
   const language = emailLanguage(request.headers.get('X-Login-Language'));
   const theme = emailTheme(request.headers.get('X-Login-Theme'));
   return (email, code, type) => ctx.waitUntil(type === 'change-email' || type === 'email-verification'
-    ? sendCodeByEmail(env.RESEND_API_KEY, env.EMAIL_FROM, email, code, language, theme, env)
+    ? sendCodeByEmail(env.RESEND_API_KEY, env.EMAIL_FROM, email, code, language, theme, env, 'account')
     : deliverCode(env, email, code, language, theme));
 }
