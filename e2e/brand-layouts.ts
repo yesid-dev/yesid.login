@@ -77,6 +77,14 @@ async function task({ page, origin, shots, lang, theme, width, name, check }: Fi
     await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
     await fits(page, name + ' enlarged text', check);
     await page.evaluate(() => { document.documentElement.style.fontSize = ''; });
+    // WCAG 1.4.12: reader text spacing wraps the button instead of pushing the form past its card.
+    const spacing = await page.addStyleTag({ content: '*{line-height:1.5!important;letter-spacing:.12em!important;word-spacing:.16em!important}p{margin-bottom:2em!important}' });
+    check(`layouts text spacing keeps the form inside its card ${name}`, await page.locator('.form-card').first().evaluate(card => {
+      const c = card.getBoundingClientRect();
+      return card.scrollWidth <= card.clientWidth && [...card.querySelectorAll('label, input, button')].every(el => { const r = el.getBoundingClientRect(); return r.left >= c.left - 0.5 && r.right <= c.right + 0.5; });
+    }));
+    await fits(page, name + ' text spacing', check);
+    await spacing.evaluate(el => (el as Element).remove());
   }
 
   if (lang === 'en' && width === 390) await page.screenshot({ path: resolve(shots, `L-M1-${theme}.png`), fullPage: true });

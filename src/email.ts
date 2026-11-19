@@ -35,13 +35,20 @@ const words = {
   en: { subject: 'Your sign-in code:', title: 'Your sign-in code', editor: 'Site editor', note: 'Enter this code on the sign-in page. It expires in 5 minutes. If you did not request it, ignore this message.' },
   es: { subject: 'Tu código de inicio de sesión:', title: 'Tu código de inicio de sesión', editor: 'Editor del sitio', note: 'Escribe este código en la página de inicio de sesión. Vence en 5 minutos. Si no lo solicitaste, ignora este mensaje.' }
 };
+/** Codes for changing the account email, to the current or the new address. */
+const accountWords = {
+  fr: { subject: 'Votre code pour changer de courriel :', title: 'Votre code pour changer de courriel', note: 'Entrez ce code sur la page Changer mon courriel. Il expire dans 5 minutes. Si vous n’avez pas demandé ce changement, ignorez ce message.' },
+  en: { subject: 'Your code to change your email:', title: 'Your code to change your email', note: 'Enter this code on the Change my email page. It expires in 5 minutes. If you did not ask for this change, ignore this message.' },
+  es: { subject: 'Tu código para cambiar tu correo:', title: 'Tu código para cambiar tu correo', note: 'Escribe este código en la página Cambiar mi correo. Vence en 5 minutos. Si no pediste este cambio, ignora este mensaje.' }
+};
+export type CodePurpose = 'sign-in' | 'account';
 
 /** The passcode email in the yesid.dev design, with a plain text version for every mail app. */
-export function passcodeEmail(code: string, language: EmailLanguage = 'fr', theme: EmailTheme = 'dark'): Email {
+export function passcodeEmail(code: string, language: EmailLanguage = 'fr', theme: EmailTheme = 'dark', purpose: CodePurpose = 'sign-in'): Email {
   if (!/^\d{6}$/.test(code)) throw new Error('A passcode must be six digits');
 
   const dark = colours(emailTheme(theme));
-  const text = words[emailLanguage(language)];
+  const text = (purpose === 'account' ? accountWords : words)[emailLanguage(language)];
   return {
     subject: `${text.subject} ${code}`,
     text: `${text.title}\n\n${code}\n\n${text.note}\n\nlogin.yesid.dev\n`,
