@@ -688,7 +688,7 @@ async function peopleOutcomeChecks(page: Page, lang: 'fr' | 'en' | 'es', width: 
 }
 // LOG-5: A-1/A-2/A-4/A-5/A-8/A-9, isolated synthetic replies; no email leaves the browser.
 async function accountCorrectness(browser: import('playwright-core').Browser) {
-  for (const lang of ['en', 'fr', 'es']) {
+  for (const lang of ['en', 'fr', 'es'] as const) {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     await context.addInitScript(() => localStorage.setItem('login.session.example', JSON.stringify({ token: 'account-test' })));
     const page = await context.newPage();
@@ -755,9 +755,10 @@ async function accountCorrectness(browser: import('playwright-core').Browser) {
       await page.getByRole('status').filter({ hasText: stage === 'current' ? /check this code|vérifier ce code|verificar este código/ : /change your email|changer votre adresse|cambiar tu correo/ }).waitFor();
       check(`A-2 ${stage} malformed reply restores focus ${lang}`, await codeField(page).evaluate(el => document.activeElement === el));
       malformed = false; lost = true; await submit();
-      await page.getByRole('status').filter({ hasText: stage === 'current' ? /check this code|vérifier ce code|verificar este código/ : /change your email|changer votre adresse|cambiar tu correo/ }).waitFor();
+      // A-5: a lost change reply is not a plain failure; accountRecovery covers its two sign-ins.
+      await page.getByRole('status').filter({ hasText: stage === 'current' ? /check this code|vérifier ce code|verificar este código/ : accountCopy[lang].lost }).waitFor();
       lost = false;
-      check(`A-2 ${stage} lost response retains code and focus ${lang}`, await codeField(page).inputValue() === '123456' && await codeField(page).evaluate(el => document.activeElement === el));
+      if (stage === 'current') check(`A-2 ${stage} lost response retains code and focus ${lang}`, await codeField(page).inputValue() === '123456' && await codeField(page).evaluate(el => document.activeElement === el));
       await page.screenshot({ path: resolve(SHOTS, `log-5-${lang}-${stage}-390.png`) });
       if (stage === 'current') { await submit(); await page.getByRole('status').filter({ hasText: /If this address|Si cette adresse|Si esta dirección/ }).waitFor(); }
     }
