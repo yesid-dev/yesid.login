@@ -24,6 +24,8 @@ async function brand(page: Page, name: string, check: Check) {
   });
   check(`layouts footer divider and gap ${name}`, geometry.divider === 18 && geometry.gap === 8, JSON.stringify(geometry));
   check(`layouts footer lowercase name ${name}`, await product.innerText() === 'login');
+  // DEV-43: footer tops use the kit hazard strip, not the street edge.
+  check(`layouts footer top is the hazard strip ${name}`, await footer.locator('[data-slot="footer-hazard-edge"]').count() === 1 && await footer.locator('[data-slot="footer-street-edge"]').count() === 0);
 
   for (const cluster of await clusters.all()) {
     const links = cluster.getByRole('link');
