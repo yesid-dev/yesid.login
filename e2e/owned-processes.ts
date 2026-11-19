@@ -31,42 +31,49 @@ function Stop-RecordedProcess($request) {
     throw
   } finally { if($candidate) { $candidate.Dispose() } }
 }
-# One native process snapshot: parent, name and creation time in about 0.1 s, where WMI takes seconds on a busy host.
-# Creation times use the same 1-microsecond rounding as the targeted read below; a process this user cannot open
-# reports no creation time, and the ownership checks fail closed on any such row they would need.
+# One kernel process snapshot (NtQuerySystemInformation): pid, parent, name and creation time for every process in a
+# single call, about 0.1 s, where WMI takes seconds on a busy host. Creation times use the same 1-microsecond rounding
+# as the targeted read below. The offsets are the 64-bit layout; any other architecture fails closed.
 Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Runtime.InteropServices;
-public sealed class LoginProcessRow { public uint pid { get; set; } public uint parent { get; set; } public string name { get; set; } public string created { get; set; } }
+public sealed class LoginProcessRow { public long pid { get; set; } public long parent { get; set; } public string name { get; set; } public string created { get; set; } }
 public static class LoginProcessSnapshot {
-  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-  struct Entry { public uint size; public uint usage; public uint pid; public IntPtr heap; public uint module; public uint threads; public uint parent; public int priority; public uint flags; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string exe; }
-  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
-  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool Process32FirstW(IntPtr snapshot, ref Entry entry);
-  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool Process32NextW(IntPtr snapshot, ref Entry entry);
-  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
-  [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetProcessTimes(IntPtr process, out long created, out long exited, out long kernel, out long user);
-  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  [DllImport("ntdll.dll")] static extern int NtQuerySystemInformation(int infoClass, IntPtr buffer, int length, out int returned);
   public static List<LoginProcessRow> Take() {
-    var rows = new List<LoginProcessRow>();
-    IntPtr snapshot = CreateToolhelp32Snapshot(0x2, 0);
-    if (snapshot == new IntPtr(-1)) throw new Win32Exception();
+    if (IntPtr.Size != 8) throw new PlatformNotSupportedException("The process snapshot reads the 64-bit layout only");
+    int length = 1 << 20;
+    IntPtr buffer = IntPtr.Zero;
     try {
-      var entry = new Entry(); entry.size = (uint)Marshal.SizeOf(typeof(Entry));
-      if (!Process32FirstW(snapshot, ref entry)) throw new Win32Exception();
-      do {
-        string created = "";
-        IntPtr process = OpenProcess(0x1000, false, entry.pid);
-        if (process != IntPtr.Zero) {
-          try { long c, e, k, u; if (GetProcessTimes(process, out c, out e, out k, out u) && c > 0) created = (c - (c % 10)).ToString(); }
-          finally { CloseHandle(process); }
-        }
-        rows.Add(new LoginProcessRow { pid = entry.pid, parent = entry.parent, name = entry.exe, created = created });
-      } while (Process32NextW(snapshot, ref entry));
-    } finally { CloseHandle(snapshot); }
-    return rows;
+      while (true) {
+        buffer = Marshal.AllocHGlobal(length);
+        int returned;
+        int status = NtQuerySystemInformation(5, buffer, length, out returned);
+        if (status == 0) break;
+        Marshal.FreeHGlobal(buffer); buffer = IntPtr.Zero;
+        if (status != unchecked((int)0xC0000004)) throw new InvalidOperationException("Process snapshot failed: 0x" + status.ToString("X8"));
+        length = Math.Max(length * 2, returned + 65536);
+      }
+      var rows = new List<LoginProcessRow>();
+      long offset = 0;
+      while (true) {
+        IntPtr entry = new IntPtr(buffer.ToInt64() + offset);
+        int next = Marshal.ReadInt32(entry, 0x00);
+        long created = Marshal.ReadInt64(entry, 0x20);
+        int nameBytes = Marshal.ReadInt16(entry, 0x38) & 0xFFFF;
+        IntPtr namePointer = Marshal.ReadIntPtr(entry, 0x40);
+        rows.Add(new LoginProcessRow {
+          pid = Marshal.ReadIntPtr(entry, 0x50).ToInt64(),
+          parent = Marshal.ReadIntPtr(entry, 0x58).ToInt64(),
+          name = namePointer == IntPtr.Zero ? "" : Marshal.PtrToStringUni(namePointer, nameBytes / 2),
+          created = created > 0 ? (created - (created % 10)).ToString() : ""
+        });
+        if (next == 0) break;
+        offset += next;
+      }
+      return rows;
+    } finally { if (buffer != IntPtr.Zero) Marshal.FreeHGlobal(buffer); }
   }
 }
 '@
