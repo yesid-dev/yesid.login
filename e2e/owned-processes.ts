@@ -31,6 +31,45 @@ function Stop-RecordedProcess($request) {
     throw
   } finally { if($candidate) { $candidate.Dispose() } }
 }
+# One native process snapshot: parent, name and creation time in about 0.1 s, where WMI takes seconds on a busy host.
+# Creation times use the same 1-microsecond rounding as the targeted read below; a process this user cannot open
+# reports no creation time, and the ownership checks fail closed on any such row they would need.
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public sealed class LoginProcessRow { public uint pid { get; set; } public uint parent { get; set; } public string name { get; set; } public string created { get; set; } }
+public static class LoginProcessSnapshot {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  struct Entry { public uint size; public uint usage; public uint pid; public IntPtr heap; public uint module; public uint threads; public uint parent; public int priority; public uint flags; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string exe; }
+  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool Process32FirstW(IntPtr snapshot, ref Entry entry);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool Process32NextW(IntPtr snapshot, ref Entry entry);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetProcessTimes(IntPtr process, out long created, out long exited, out long kernel, out long user);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  public static List<LoginProcessRow> Take() {
+    var rows = new List<LoginProcessRow>();
+    IntPtr snapshot = CreateToolhelp32Snapshot(0x2, 0);
+    if (snapshot == new IntPtr(-1)) throw new Win32Exception();
+    try {
+      var entry = new Entry(); entry.size = (uint)Marshal.SizeOf(typeof(Entry));
+      if (!Process32FirstW(snapshot, ref entry)) throw new Win32Exception();
+      do {
+        string created = "";
+        IntPtr process = OpenProcess(0x1000, false, entry.pid);
+        if (process != IntPtr.Zero) {
+          try { long c, e, k, u; if (GetProcessTimes(process, out c, out e, out k, out u) && c > 0) created = (c - (c % 10)).ToString(); }
+          finally { CloseHandle(process); }
+        }
+        rows.Add(new LoginProcessRow { pid = entry.pid, parent = entry.parent, name = entry.exe, created = created });
+      } while (Process32NextW(snapshot, ref entry));
+    } finally { CloseHandle(snapshot); }
+    return rows;
+  }
+}
+'@
 [Console]::WriteLine('ready')
 while($null -ne ($line = [Console]::ReadLine())) {
   $request = $line | ConvertFrom-Json
@@ -55,10 +94,10 @@ while($null -ne ($line = [Console]::ReadLine())) {
       } finally { if($candidate) { $candidate.Dispose() } }
     } else {
       $snapshotStarted = [DateTime]::UtcNow.ToFileTimeUtc()
-      $rows = @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,Name,CreationDate | Where-Object {
-        !$_.CreationDate -or $_.CreationDate.ToFileTimeUtc() -le $snapshotStarted
-      } | ForEach-Object {
-        [pscustomobject]@{pid=$_.ProcessId;parent=$_.ParentProcessId;name=$_.Name;created=$(if($_.CreationDate){$_.CreationDate.ToFileTimeUtc().ToString()}else{''})}
+      $rows = @(foreach($row in [LoginProcessSnapshot]::Take()) {
+        if(!$row.created -or [long]$row.created -le $snapshotStarted) {
+          [pscustomobject]@{pid=$row.pid;parent=$row.parent;name=$row.name;created=$row.created}
+        }
       })
     }
     [pscustomobject]@{id=$request.id;rows=$rows} | ConvertTo-Json -Depth 4 -Compress
