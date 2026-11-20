@@ -1,6 +1,6 @@
 # Sign-in, code, Account and editor hand-off: state transitions
 
-This is the target behaviour for the sign-in app's screens: what each stage asks for, what it consumes, what it keeps and where every outcome leads. Tests and pull requests cite its rule numbers, such as `S-7` or `A-4`. Where today's code differs, the difference is listed under "Today" and the slice that closes it is named.
+This is the behaviour of the sign-in app's screens: what each stage asks for, what it consumes, what it keeps and where every outcome leads. Tests and pull requests cite its rule numbers, such as `S-7` or `A-4`.
 
 It changes no server rule. The Worker, Better Auth and the tests in `tests/` stay the authority for codes, budgets, sessions and site binding. Nothing here weakens `src/guard.ts`, `src/relay.ts`, `src/graphql-read.ts`, permissions, the neutral sign-in wording or `sameCodeFailure`.
 
@@ -214,26 +214,3 @@ Account lives at `/account?site=<slug>` and needs the stored token for that site
 - A4 is never restored. The token is already gone, so A-1 sends the person to sign in.
 
 **A-9. 401 at any stage.** The session ended. Remove `login.account.<slug>` (a failure is ignored, and the `userId` check covers a stale record) and go to `/?site=<slug>`.
-
-## Today, and the slice that closes each gap
-
-| Gap | Rule | Slice |
-| --- | --- | --- |
-| `maxlength="6"` cuts a pasted code with a space, and no separators are removed | S-4 | LOG-2 |
-| At the deadline the Code stage returns to Email with "Invalid or expired code" | S-10 | LOG-2 |
-| `readStep` clears an expired step, so a reload after the deadline loses the address | S-11 | LOG-2 |
-| Resend keeps the old digits after success | S-8 | LOG-2 |
-| The deadline is taken after the reply, not before the request | Clock | LOG-2 |
-| "Too many requests. Try again in a few minutes." ignores the `X-Retry-After` wait the server gives | S-12 | LOG-2 (sign-in), LOG-5 (Account) |
-| The switch action label is clipped in French and Spanish | S-17 | LOG-3 |
-| Closed: a site-list 401 returns to Email with the sign-in-ended explanation | S-13 | LOG-6 |
-| Closed: the chooser has one heading; the empty message replaces its heading and card | S-15, S-16 | LOG-6 |
-| Closed: popup success waits for the exact captured-opener acknowledgement, posts once, and cleans up its listener and timer | H-4 to H-7 | LOG-6 |
-| Closed: editor loading names the Site when known, updates a persistent sentence live region, and uses Inter Variable | H-3 | LOG-6 |
-| A failed Account restore enables the form; "Invalid or expired code" and "Could not sign in" appear out of place | A-1, A-2 | LOG-5 |
-| The Account code field cuts a formatted paste | A-4, A-5 | LOG-5 |
-| A language change loses the Account stage and the new address | A-8 | LOG-5 (keep the address); LOG-15 (full stages) |
-| Closed: A2 and A3 offer Request another code and Start again; from A3 every way back leads to A1 with a note | A-6 | LOG-15 |
-| Closed: at the Account deadline the stage and digits stay, the check is disabled and Request another code leads on | A-7 | LOG-15 |
-| Closed: a lost reply to the address change offers sign-in with either address | A-5 | LOG-15 |
-| Account is linked only from People | Account | LOG-16 |

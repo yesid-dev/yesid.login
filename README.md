@@ -7,7 +7,7 @@ This is the production sign-in service for [yesid.dev](https://yesid.dev) client
 
 ## Documentation
 
-- [Architecture](https://yesid-dev.notion.site/4113e863069081b99778facfd68548a6): how the service works today, verified against this repository: routes, sign-in and sessions, the GitHub relay, the data model, testing, release and known limits.
+- [Architecture](https://yesid-dev.notion.site/4113e863069081b99778facfd68548a6): how the service works, verified against this repository: routes, sign-in and sessions, the GitHub relay, the data model, testing, release and known limits.
 - [Glossary](GLOSSARY.md): the words used for the service, its sites and their people.
 - [State transitions](docs/state-transitions.md): what each sign-in, code, Account and editor hand-off stage asks for, keeps and leads to. Tests cite its rule numbers.
 
@@ -136,8 +136,8 @@ The theme boot is an external blocking script before CSS. It reads the design sy
 key and otherwise follows the system; `@yesid/ui/state` adopts it and owns toggling.
 The upstream theme defaults to dark, so the small external boot is intentionally app-owned.
 Login documents alone allow inline styles because design-system components emit style
-attributes, and `img-src 'self' data:` for the design-system favicon. Scripts remain self-only, without inline scripts or unsafe-eval. No new origins.
-API response CSP and editor CSP are unchanged.
+attributes, and `img-src 'self' data:` for the design-system favicon. Scripts stay self-only, without inline scripts or unsafe-eval, and no other origin is allowed.
+API responses and the editor keep their own CSPs.
 
 Language priority: allowlisted `?lang=`, `login.language`, supported browser language, French.
 The toggle preserves all query parameters, including `site`. Reloads preserve a signed-in token.
@@ -148,7 +148,7 @@ At Sveltia 0.261.0, `UE.get/set` JSON serializes localStorage, and the preferenc
 reads `sveltia-cms.prefs` through UE. Its IndexedDB wrapper VE is separate and does not store
 these preferences. Login merges only `locale` and `theme`, mapping FR to `fr`, EN to `en-CA`,
 and ES to `es-CO`. Other preferences remain intact. Recheck this undocumented contract when
-upgrading Sveltia. Its theme stylesheet and editor boot are unchanged.
+upgrading Sveltia.
 
 ## People management
 
@@ -158,7 +158,7 @@ memberships and user names remain unchanged. DELETE with the internal user ID re
 membership on that site, keeps the user record and revokes sessions after the last membership is removed.
 The page shell contains no private data; its bearer-authenticated API also gates the controls.
 
-Apply `0004_people.sql` before releasing this Worker. It adds `people_log` and a membership insert trigger
+Migration `0004_people.sql` adds `people_log` and a membership insert trigger
 that enforces 25 people per site and 20 additions in the preceding hour. D1 batches keep membership and
 audit writes atomic. Re-adding a member writes no audit and sends no email. Welcome emails use the adding
 person's allowlisted language. Send failure leaves access in place and warns the Owner.
@@ -227,7 +227,7 @@ and GitHub App, installed only on a sandbox repository whose `staging` branch po
 
 ### Deploy now
 
-By the 2026-11-10 owner rule, the owner may ship a chosen commit after a build only,
+By owner rule, the owner may ship a chosen commit after a build only,
 without tests, required checks or waiting. Plain `bun run release:now` deploys the current
 checkout to production. It copies the editor and builds login, then deploys; it skips
 tests, `check`, the browser run and staging. `bun run release:now:staging` targets staging.
@@ -279,7 +279,7 @@ on the operator's machine.
 
 `bun run test:e2e` runs all four shards in parallel and fails if any shard fails.
 Each shard starts a separate Node process, ephemeral Worker/D1 database and Chromium,
-with the unchanged ten-minute watchdog and one-minute fixture/startup limit. Its fixtures
+with a ten-minute watchdog and a one-minute fixture/startup limit. Its fixtures
 are created through its own Worker binding. Scenario registration is checked against the
 assignment before execution: missing, duplicate and unknown assignments fail the run.
 Keep dependent journeys in their existing order when changing `e2e/shards.ts`.
@@ -313,7 +313,7 @@ At 0.261.0, its localStorage wrapper JSON serializes `sveltia-cms.user`. The min
 
 Undefined fields are omitted by JSON serialization. The bootstrap does not fabricate an identity. Every request still requires a server-validated signed session and membership. The browser token is a bearer credential accessible to same-origin scripts, so preserve CSP, the pinned bundle and origin ownership. Recheck this undocumented storage contract whenever upgrading Sveltia.
 
-Sveltia's `iRe` appends `/api/v3`; `aRe` appends `/api/graphql` to the configured per-site roots. Sveltia's sign-out writes `{}` through `V9e`; it does not revoke the server session. Boot keeps the token in memory and observes missing tokens via polling and cross-tab storage events, posts Better Auth sign-out and returns to `/`. Failed sign-out is shown and retried. Boot intercepts same-site relay 401 responses and returns to `/?site=<slug>`. Sveltia ordinarily surfaces API failures as errors and may show its sign-in screen. A full navigation on expiry discards in-memory unsaved work. No preservation guarantee is made for Sveltia's own drafts. Saving again requires signing back in.
+Sveltia's `iRe` appends `/api/v3`; `aRe` appends `/api/graphql` to the configured per-site roots. Sveltia's sign-out writes `{}` through `V9e`; it does not revoke the server session. Boot keeps the token in memory and observes missing tokens via polling and cross-tab storage events, posts Better Auth sign-out and returns to `/`. Failed sign-out is shown and retried. Boot intercepts same-site relay 401 responses and returns to `/?site=<slug>`, without a warning, as soon as the editor makes its next request after a session ends. Sveltia keeps typed edits as a local draft backup in the browser and offers Restore Draft when the entry is opened again after signing back in; that is Sveltia's behaviour, not a guarantee Login makes. Saving again requires signing back in.
 
 ### Legal pages, chrome and retention
 
@@ -328,9 +328,9 @@ The editor startup screen loads local token CSS and fonts, without the login app
 Its dot-and-ring favicon follows the selected theme at entry. Login documents allow
 `img-src 'self' data:`: same-origin icons and the design system's Chrome, which builds its
 theme-coloured favicon as a `data:` SVG. The editor's CSP is unchanged. No manifest is installed.
-HTML responses send `no-transform`, because the yesid.dev zone's Web Analytics otherwise injects
-its beacon at the edge, which local runs cannot show. CSP blocked it, but this notice says no analytics. Browser theme-color
-follows the design tokens; no analytics were added.
+HTML responses send `no-transform`, so the yesid.dev zone's Web Analytics cannot inject its beacon
+at the edge (local runs cannot show that injection). Browser theme-color follows the design tokens.
+Login's only analytics are the cookieless Plausible pageviews relayed through `/relay/e`.
 
 The daily Cron Trigger runs at 08:17 UTC. `src/retention.ts` runs one D1 batch:
 
@@ -369,7 +369,7 @@ Every response carries HSTS (`max-age=63072000; includeSubDomains`, without prel
 Permissions-Policy disabling camera, microphone and geolocation. Missing headers default to
 `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and
 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'`.
-Existing page and asset CSPs are preserved exactly.
+Page and asset CSPs set by the handlers are kept exactly.
 
 GraphQL uses a closed parsed-AST read list for Sveltia 0.261.0: exactly one query,
 no fragment definitions or directives, and one unaliased repository root bound through
@@ -380,10 +380,9 @@ at most 300 per document. Pagination arguments and nested fields must match the 
 shapes. Commit returns allow only oid, committedDate and numbered content file OIDs;
 all existing commit input restrictions still apply.
 
-A capture on staging (2026-11-08) found two more read shapes the same bundle sends: the History panel's
+The same bundle also sends two more read shapes, each accepted in exactly this form: the History panel's
 per-file history (up to 100 commits: OID, headline, author name, email and avatar, date), and a save's publish
-status as three separate Commit queries (status, check suites, deployments). Both are accepted in exactly that
-form. History paths must still be content paths, and the OIDs it returns do not open older file contents.
+status as three separate Commit queries (status, check suites, deployments). History paths must still be content paths, and the OIDs it returns do not open older file contents.
 
 REST tree responses retain content blobs and their ancestor trees, preserving other
 response fields. REST blobs and GraphQL Blob OID reads require membership in the site's
@@ -414,30 +413,28 @@ Every relayed GitHub reply is also checked against the installation's hourly bud
 ### Sign-in hardening
 
 - Code requests and code checks take at least one second (`src/code-requests.ts`), so their
-  duration cannot reveal whether an address has an account. Replies were already identical.
+  duration cannot reveal whether an address has an account. Replies are identical too.
 - Each address gets at most 5 code requests an hour and 10 a day, whoever asks. Migration 0007
   adds `code_budget`, which stores a keyed hash of the address, never the address, and the daily
   cleanup deletes rows after one day. Over budget, the reply is the usual success and nothing changes.
   Each request claims its slot in one atomic statement, so simultaneous requests cannot overshoot,
   and a request the auth library refuses (IP limit, validation) gives its slot back.
-  Limit accepted: someone who knows an address can use up its hour and keep that person from getting
-  a code until it resets. Without the budget, rotating IP addresses allowed the same, without end.
+  Accepted limit: someone who knows an address can use up its hour and keep that person from getting
+  a code until it resets. The per-address budget is what stops rotating IP addresses from doing so without end.
 - Sessions travel only as bearer tokens. The Worker removes `Cookie` from every `/auth/api/` request and
   `Set-Cookie` from every auth reply, so a leftover cookie can never stand in for a cleared token.
 - The auth library logs only error kinds: its logger and its unexpected errors are routed through
-  fixed messages. It no longer inspects the database schema on every request.
+  fixed messages. It does not inspect the database schema per request.
 
-New Better Auth sessions store empty IP and user-agent values via the session creation hook.
+Better Auth sessions store empty IP and user-agent values via the session creation hook.
 IP tracking remains enabled for code-route rate limits. A raw database session token cannot
-be used as a bearer; its signed form is required. Existing session IP/browser values age out
-with the eight-hour expiry and daily cleanup. Columns remain in place; no data migration is
-needed. The browser token still needs same-origin script protection.
+be used as a bearer; its signed form is required. The IP and browser columns stay in the schema, empty.
+The browser token still needs same-origin script protection.
 
 ### Site-bound sessions
 
-Apply additive migration `0008_session_site.sql` before this Worker. Existing sessions have no
-binding; after ten minutes they require a fresh code. New sessions can only list sites, bind,
-read their session or sign out until bound. A bound session counts only while its person is still an
+Migration `0008_session_site.sql` adds the site binding. A session starts unbound and can only list sites, bind,
+read its session or sign out until bound; an unbound session expires after ten minutes. A bound session counts only while its person is still an
 eligible member of that site, and removing an Employee deletes their sessions for it. The conditional D1 update chooses one site once;
 every config, REST, GraphQL and People data route also checks that binding and current membership.
 
@@ -450,7 +447,7 @@ but this storage choice is not an origin isolation boundary against scripts read
 
 People links Account with `?site=<slug>`. Account is a public shell so it can load a bearer from
 localStorage; its form and every email-change API require a bound session. Current-address and
-new-address code proofs remain required. People also offers signing out of the current site to
+new-address code proofs are both required. People also offers signing out of the current site to
 switch, followed by a fresh code and site choice. Sign-out clears only that site's saved token.
 
 The browser runner selects `e2e/worker.ts` explicitly. It stubs email HTTP requests and rejects
