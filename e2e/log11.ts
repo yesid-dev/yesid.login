@@ -28,7 +28,9 @@ export async function log11Chrome(page: Page, name: string, check: Check) {
   check(`LOG-14 navbar divider uses shared equal spacing ${name}`, geometry.splitGaps.every(gap => Math.abs(gap - geometry.split) < 0.6), JSON.stringify(geometry));
   const language = page.getByTestId('language-toggle');
   const lang = await page.locator('html').getAttribute('lang') as 'en' | 'fr' | 'es';
-  check(`LOG-11 language spoken by name ${name}`, (await language.getAttribute('aria-label'))!.includes({ en: 'English', fr: 'Français', es: 'Español' }[lang]));
+  // The link is spoken by the language it opens, in that language's own name.
+  const next = ({ en: 'fr', fr: 'es', es: 'en' } as const)[lang];
+  check(`LOG-11 language spoken by name ${name}`, await language.and(page.getByRole('link', { name: { en: 'English', fr: 'Français', es: 'Español' }[next] })).count() === 1);
   const moving = await pill.locator('[data-slot="wordmark"]').evaluateAll(nodes => nodes.flatMap(node => [node, ...node.querySelectorAll('*')]).some(node => node.getAnimations().some(a => a.playState === 'running')));
   check(`LOG-11 wordmark still with motion allowed ${name}`, !moving && await page.evaluate(() => matchMedia('(prefers-reduced-motion: no-preference)').matches));
 }

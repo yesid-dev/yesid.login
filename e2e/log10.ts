@@ -14,8 +14,15 @@ export async function log10Chrome(page: Page, lang: keyof typeof labels, check: 
   check(`LOG-10 footer has no date or time ${lang}`, !/\d/.test(text) && await footer.locator('time').count() === 0);
   check(`LOG-10 tagline keeps its words without slashes ${lang}`, await footer.getByText(labels[lang].tagline, { exact: true }).isVisible() && !text.includes('//'));
   check(`LOG-10 theme name unchanged ${lang}`, await page.getByRole('switch', { name: labels[lang].theme, exact: true }).isVisible());
-  // The control label/current-language name stays the same; the board suffix follows the release's new order.
-  check(`LOG-10 language name and boards ${lang}`, await page.getByRole('link', { name: `${labels[lang].language}: ${labels[lang].name} (EN FR ES)`, exact: true }).isVisible());
+  // The language link is named by its destination: the next language's own name, marked with its lang, then the boards.
+  // French puts a no-break space before the colon; the text check keeps that space exact.
+  const next = ({ fr: 'es', en: 'fr', es: 'en' } as const)[lang];
+  const spoken = `${labels[lang].language}${lang === 'fr' ? ' : ' : ': '}${labels[next].name} (EN FR ES)`;
+  const language = page.getByRole('link', { name: spoken, exact: true });
+  check(`LOG-10 language link named by its destination ${lang}`, await language.isVisible() && (await language.textContent())!.includes(spoken));
+  check(`LOG-10 language link marks its destination language ${lang}`, await language.getAttribute('hreflang') === next
+    && await language.locator(`[lang="${next}"]`).textContent() === labels[next].name);
+  check(`LOG-10 language link has no live region ${lang}`, await language.locator('[aria-live]').count() === 0);
   check(`LOG-10 no header menu ${lang}`, await page.getByRole('button', { name: 'Menu', exact: true }).count() === 0);
 }
 
