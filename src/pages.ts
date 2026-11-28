@@ -27,6 +27,9 @@ const SHARE_IMAGE = 'https://login.yesid.dev/login/og.png';
 /** One card for every address: it names no client, and a link preview cannot know the reader's language. */
 const HEAD_BRAND = `<meta name="description" content="${SUMMARY}"><meta name="theme-color" content="#141414"><link rel="icon" href="/login/favicon-dark.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/login/apple-touch-icon.png">
 <meta property="og:type" content="website"><meta property="og:site_name" content="yesid.dev"><meta property="og:title" content="login.yesid.dev"><meta property="og:description" content="${SUMMARY}"><meta property="og:image" content="${SHARE_IMAGE}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="yesid. login.yesid.dev"><meta name="twitter:card" content="summary_large_image">`;
+/** The latin faces draw the first paint. Their font-display is optional, so they must arrive before it; latin-ext loads on demand. */
+export const PRELOADED_FONTS = ['inter-latin-wght-normal.woff2', 'jetbrains-mono-latin-wght-normal.woff2'] as const;
+const FONT_PRELOADS = PRELOADED_FONTS.map(file => `<link rel="preload" href="/login/fonts/${file}" as="font" type="font/woff2" crossorigin>`).join('');
 interface Shell { title: string; index?: boolean; page?: string; lang?: string; content: string; startup?: boolean }
 /** The first paint before the app mounts, and what stays on screen if its bundle cannot load. */
 const loginShell = ({ title, index, page, lang = 'fr', content, startup }: Shell) => `<!doctype html>
@@ -34,6 +37,7 @@ const loginShell = ({ title, index, page, lang = 'fr', content, startup }: Shell
 ${index ? '' : '<meta name="robots" content="noindex">'}<title>${title}</title>
 ${HEAD_BRAND}
 <script src="/login/boot.js"></script>
+${FONT_PRELOADS}
 <link rel="stylesheet" href="/login/fonts.css">
 <link rel="stylesheet" href="/login/build/app.css">
 </head><body><div id="app">${content}</div>
